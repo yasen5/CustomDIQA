@@ -5,11 +5,13 @@ from datetime import datetime
 
 sys.path.insert(0, ".")
 from src.constants import (
+    MODEL_TYPES,
     TRAIN_BACKBONE_LR_SCALE_DEFAULT,
     TRAIN_BATCH_SIZE_DEFAULT,
     TRAIN_GRAD_ACCUM_DEFAULT,
     TRAIN_LOG_EVERY_DEFAULT,
     TRAIN_LR_DEFAULT,
+    TRAIN_MODEL_TYPE_DEFAULT,
     TRAIN_OSC_COOLDOWN_DEFAULT,
     TRAIN_OSC_FACTOR_DEFAULT,
     TRAIN_OSC_MIN_LR_DEFAULT,
@@ -24,6 +26,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-path", required=True)
     parser.add_argument("--image-folder", required=True)
+    parser.add_argument("--model-type", choices=MODEL_TYPES, default=TRAIN_MODEL_TYPE_DEFAULT,
+                        help="Backbone architecture to train")
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     parser.add_argument("--checkpoint-path", default=None,
                         help="Path to a checkpoint dir or weights.pt file to resume training from")
@@ -45,5 +49,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(args.checkpoint_dir, exist_ok=True)
-    args.save_path = os.path.join(args.checkpoint_dir, f"run_{timestamp}_steps{args.steps}")
+    args.save_path = os.path.join(args.checkpoint_dir, f"run_{args.model_type}_{timestamp}_steps{args.steps}")
     train(args)

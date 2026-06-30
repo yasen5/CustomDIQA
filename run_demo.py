@@ -23,7 +23,7 @@ from src.constants import (
     TRAIN_SAMPLE_SEED_DEFAULT,
 )
 from src.datasets.gen_soft_label import load_soft_label_samples
-from src.model.vit.model import EncoderModel
+from src.model import build_model, load_model_type
 from src.trainer import SimpleImageProcessor, get_device
 from src.utils import expand2square
 
@@ -43,7 +43,7 @@ def run_model(model, processor, pil_images, device):
     return probs, scores
 
 
-def make_plot(titles, images, gt_scores, gt_probs_list, pred_probs, pred_scores, out_path):
+def make_plot(titles, images, gt_scores, gt_probs_list, pred_probs, pred_scores, out_path, model_type):
     n = len(titles)
     x = np.arange(len(DEMO_LEVELS))
 
@@ -75,7 +75,7 @@ def make_plot(titles, images, gt_scores, gt_probs_list, pred_probs, pred_scores,
         ax_dist.legend(fontsize=7.5, loc="upper right")
         ax_dist.set_title("Label Distributions", fontsize=9, pad=4)
 
-    fig.suptitle("EncoderModel — Predicted vs Ground-Truth", fontsize=13, y=1.01)
+    fig.suptitle(f"{model_type.upper()} — Predicted vs Ground-Truth", fontsize=13, y=1.01)
     fig.savefig(out_path, bbox_inches="tight", dpi=150)
     print(f"Saved to {out_path}")
 
@@ -84,17 +84,22 @@ def demo(args):
     device = get_device()
     print(f"Device: {device}")
 
-    model = EncoderModel().to(device=device, dtype=torch.float32)
-    weights_path = (
-        os.path.join(args.model_path, "weights.pt")
-        if os.path.isdir(args.model_path)
-        else args.model_path
-    )
+    if os.path.isdir(args.model_path):
+        model_type = args.model_type or load_model_type(args.model_path)
+        weights_path = os.path.join(args.model_path, "weights.pt")
+    else:
+        if args.model_type is None:
+            raise ValueError("--model-type is required when --model-path is a weights file, not a checkpoint dir")
+        model_type = args.model_type
+        weights_path = args.model_path
+
+    model, model_constants = build_model(model_type)
+    model = model.to(device=device, dtype=torch.float32)
     model.load_state_dict(torch.load(weights_path, map_location="cpu"))
     model.eval()
-    print(f"Loaded model from {weights_path}")
+    print(f"Loaded {model_type} model from {weights_path}")
 
-    processor = SimpleImageProcessor()
+    processor = SimpleImageProcessor(model_constants.img_size)
 
     # Replicate the exact pool the trainer used (same filtering + same RNG).
     all_data = [s for s in load_soft_label_samples(args.data_path) if s.level_probs is not None]
@@ -122,12 +127,14 @@ def demo(args):
         print(f"{title:<30}  pred={score:.2f}  gt={gt_score:.2f}  [{dist}]")
 
     if args.out:
-        make_plot(titles, images, gt_scores, gt_probs_list, pred_probs, pred_scores, args.out)
+        make_plot(titles, images, gt_scores, gt_probs_list, pred_probs, pred_scores, args.out, model_type)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-path", required=True)
+    parser.add_argument("--model-type", choices=["vit", "cnn"], default=None,
+                        help="Overrides the checkpoint's recorded model type; required if --model-path is a weights file")
     parser.add_argument("--data-path", required=True)
     parser.add_argument("--image-folder", required=True)
     parser.add_argument("--sample-size", type=int, default=None,

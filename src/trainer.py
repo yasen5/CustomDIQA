@@ -11,18 +11,17 @@ import torch.nn.functional as F
 from torchvision import transforms
 
 from src.datasets.single_dataset import SingleDataset
-from src.model.vit import constants as model_constants
-from src.model.vit.model import EncoderModel
+from src.model import build_model, load_model_type, save_model_type
 
 
 class SimpleImageProcessor:
     image_mean = [0.485, 0.456, 0.406]
     image_std = [0.229, 0.224, 0.225]
-    crop_size = {"height": model_constants.img_size, "width": model_constants.img_size}
 
-    def __init__(self):
+    def __init__(self, img_size):
+        self.crop_size = {"height": img_size, "width": img_size}
         self._transform = transforms.Compose([
-            transforms.Resize((model_constants.img_size, model_constants.img_size)),
+            transforms.Resize((img_size, img_size)),
             transforms.ToTensor(),
             transforms.Normalize(mean=self.image_mean, std=self.image_std),
         ])
@@ -95,13 +94,19 @@ def train(args):
     device = get_device()
     print(f"Device: {device}")
 
-    model = EncoderModel().to(device=device, dtype=torch.float32)
+    model, model_constants = build_model(args.model_type)
+    model = model.to(device=device, dtype=torch.float32)
     if args.checkpoint_path is not None:
-        weights_path = (
-            os.path.join(args.checkpoint_path, "weights.pt")
-            if os.path.isdir(args.checkpoint_path)
-            else args.checkpoint_path
-        )
+        if os.path.isdir(args.checkpoint_path):
+            checkpoint_model_type = load_model_type(args.checkpoint_path, default=args.model_type)
+            if checkpoint_model_type != args.model_type:
+                raise ValueError(
+                    f"--model-type {args.model_type!r} does not match checkpoint model type "
+                    f"{checkpoint_model_type!r} at {args.checkpoint_path}"
+                )
+            weights_path = os.path.join(args.checkpoint_path, "weights.pt")
+        else:
+            weights_path = args.checkpoint_path
         model.load_state_dict(torch.load(weights_path, map_location=device))
         print(f"Loaded model from {weights_path}")
     model.train()
@@ -134,8 +139,11 @@ def train(args):
         os.makedirs(args.save_path, exist_ok=True)
         weights_path = os.path.join(args.save_path, "weights.pt")
         torch.save(model.state_dict(), weights_path)
-        for src in ("src/constants.py", "src/model/constants.py"):
-            dst_name = "model_constants.py" if src.endswith("model/constants.py") else "constants.py"
+        save_model_type(args.save_path, args.model_type)
+        for src, dst_name in (
+            ("src/constants.py", "constants.py"),
+            (f"src/model/{args.model_type}/constants.py", "model_constants.py"),
+        ):
             shutil.copy2(src, os.path.join(args.save_path, dst_name))
         if not quiet:
             print(f"Saved to {args.save_path}")
@@ -147,7 +155,7 @@ def train(args):
 
     signal.signal(signal.SIGINT, _sigint_handler)
 
-    processor = SimpleImageProcessor()
+    processor = SimpleImageProcessor(model_constants.img_size)
     data_args = types.SimpleNamespace(
         data_paths=[args.data_path],
         data_weights=[1],
