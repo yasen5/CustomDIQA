@@ -1,0 +1,14 @@
+{
+  "dataset_params": {
+    "kadid": {
+      "split_json": "../../../data/Data-DeQA-Score/KADID10K/metas/split.json",
+      "mos_json": "../../../data/Data-DeQA-Score/KADID10K/metas/mos.json",
+      "save_train": "../../../data/Data-DeQA-Score/KADID10K/metas/train_kadid_8k.json",
+      "save_test": "../../../data/Data-DeQA-Score/KADID10K/metas/test_kadid_2k.json",
+      "img_dir": "KADID10K/images",
+      "density_type": "pdf",
+      "thre_std": 0.2,
+      "thre_diff": 0.1
+    }
+  }
+}

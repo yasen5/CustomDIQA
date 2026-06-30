@@ -1,15 +1,14 @@
 import os
 import random
 from dataclasses import dataclass
-from typing import Dict, List, Sequence
+from typing import List
 
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from src.utils import expand2square
+from src.utils import expand2square, rank0_print
 from .gen_soft_label import load_soft_label_samples
-from .utils import rank0_print
 
 
 @dataclass
@@ -43,7 +42,7 @@ class SingleDataset(Dataset):
     def next_rand(self):
         return random.randint(0, len(self) - 1)
 
-    def __getitem__(self, i) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, i) -> SingleSampleItem:
         while True:
             try:
                 sample = self.list_data_dict[i]
@@ -77,29 +76,3 @@ class SingleDataset(Dataset):
                 print(ex)
                 i = self.next_rand()
                 continue
-
-
-@dataclass
-class DataCollatorForSupervisedDataset:
-    """Collate single-image samples into a batch."""
-
-    def __call__(self, instances: Sequence[SingleSampleItem]) -> Dict:
-        images = [inst.image for inst in instances]
-        if all(x.shape == images[0].shape for x in images):
-            images = torch.stack(images)
-
-        return {
-            "input_type": "single",
-            "images": images,
-            "level_probs": torch.tensor([inst.level_probs for inst in instances]),
-        }
-
-
-def make_single_data_module(data_args) -> Dict:
-    train_dataset = SingleDataset(
-        data_paths=data_args.data_paths,
-        data_weights=data_args.data_weights,
-        data_args=data_args,
-    )
-    data_collator = DataCollatorForSupervisedDataset()
-    return dict(train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator)
