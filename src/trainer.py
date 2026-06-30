@@ -11,8 +11,8 @@ import torch.nn.functional as F
 from torchvision import transforms
 
 from src.datasets.single_dataset import SingleDataset
-from src.model import constants as model_constants
-from src.model.model import EncoderModel
+from src.model.vit import constants as model_constants
+from src.model.vit.model import EncoderModel
 
 
 class SimpleImageProcessor:

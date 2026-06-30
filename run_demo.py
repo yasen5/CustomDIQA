@@ -23,7 +23,7 @@ from src.constants import (
     TRAIN_SAMPLE_SEED_DEFAULT,
 )
 from src.datasets.gen_soft_label import load_soft_label_samples
-from src.model.model import EncoderModel
+from src.model.vit.model import EncoderModel
 from src.trainer import SimpleImageProcessor, get_device
 from src.utils import expand2square
 
