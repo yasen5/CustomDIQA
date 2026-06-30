@@ -25,6 +25,8 @@ if __name__ == "__main__":
     parser.add_argument("--data-path", required=True)
     parser.add_argument("--image-folder", required=True)
     parser.add_argument("--checkpoint-dir", default="checkpoints")
+    parser.add_argument("--checkpoint-path", default=None,
+                        help="Path to a checkpoint dir or weights.pt file to resume training from")
     parser.add_argument("--steps", type=int, default=TRAIN_STEPS_DEFAULT)
     parser.add_argument("--batch-size", type=int, default=TRAIN_BATCH_SIZE_DEFAULT)
     parser.add_argument("--grad-accum", type=int, default=TRAIN_GRAD_ACCUM_DEFAULT)

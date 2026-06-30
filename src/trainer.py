@@ -96,6 +96,14 @@ def train(args):
     print(f"Device: {device}")
 
     model = EncoderModel().to(device=device, dtype=torch.float32)
+    if args.checkpoint_path is not None:
+        weights_path = (
+            os.path.join(args.checkpoint_path, "weights.pt")
+            if os.path.isdir(args.checkpoint_path)
+            else args.checkpoint_path
+        )
+        model.load_state_dict(torch.load(weights_path, map_location=device))
+        print(f"Loaded model from {weights_path}")
     model.train()
 
     head_params = list(model.head.parameters())

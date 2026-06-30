@@ -1,5 +1,5 @@
 embedding_channels = 768
-num_vit_layers = 12
+num_vit_layers = 4
 dropout = 0.1
 feedforward_hidden_dim_scalar = 4
 layer_norm_epsilon = 0.001
