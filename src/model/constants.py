@@ -1,0 +1,12 @@
+embedding_channels = 768
+num_vit_layers = 12
+dropout = 0.1
+feedforward_hidden_dim_scalar = 4
+layer_norm_epsilon = 0.001
+abs_value_head_scaledown = 4
+num_heads = 12
+patch_size = 14
+img_size = 448
+num_patches = (img_size // patch_size) ** 2
+attention_head_dim = embedding_channels // num_heads
+rope_base = 10000
