@@ -9,6 +9,10 @@ moderation_msg = "YOUR INPUT VIOLATES OUR CONTENT MODERATION GUIDELINES. PLEASE 
 handler = None
 
 
+def rank0_print(*args, **kwargs):
+    print(*args, **kwargs)
+
+
 def disable_torch_init():
     """
     Disable the redundant torch default initialization to accelerate model creation.
