@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-import constants
+from . import constants
 
 class EncoderAttention(nn.Module):
     def __init__(self):

@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import constants
+from . import constants
 
 class RoPE(nn.Module):
     """

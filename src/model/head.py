@@ -1,6 +1,6 @@
 import torch.nn as nn
-import constants
-import feedforward
+from . import constants
+from . import feedforward
 
 class MeanOpinionScoreHead(nn.Module):
     def __init__(self):

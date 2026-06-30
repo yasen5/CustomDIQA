@@ -1,8 +1,8 @@
 import torch.nn as nn
 import torch
-import constants
-import layer
-import head
+from . import constants
+from . import layer
+from . import head
 
 class EncoderModel(nn.Module):
     def __init__(self):

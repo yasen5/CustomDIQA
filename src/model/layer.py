@@ -1,7 +1,7 @@
 import torch.nn as nn
-import constants
-import attention
-import feedforward
+from . import constants
+from . import attention
+from . import feedforward
 
 class EncoderLayer(nn.Module):
     def __init__(self):

@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-import constants
+from . import constants
 
 class QuickGELU(nn.Module):
     def forward(self, x: torch.Tensor):
