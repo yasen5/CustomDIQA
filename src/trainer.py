@@ -182,8 +182,9 @@ def train(args):
             batch = collate([dataset[i] for i in indices])
             images = batch["images"].to(device=device, dtype=torch.float32)
             level_probs = batch["level_probs"].to(device=device)
-            logits = model(images)
-            loss = F.kl_div(F.log_softmax(logits, dim=-1), level_probs, reduction="batchmean") / accum
+            with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
+                logits = model(images)
+                loss = F.kl_div(F.log_softmax(logits, dim=-1), level_probs, reduction="batchmean") / accum
             loss.backward()
             step_loss += loss.item()
 
