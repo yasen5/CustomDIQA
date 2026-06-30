@@ -85,9 +85,14 @@ def demo(args):
     print(f"Device: {device}")
 
     model = EncoderModel().to(device=device, dtype=torch.float32)
-    model.load_state_dict(torch.load(args.model_path, map_location="cpu"))
+    weights_path = (
+        os.path.join(args.model_path, "weights.pt")
+        if os.path.isdir(args.model_path)
+        else args.model_path
+    )
+    model.load_state_dict(torch.load(weights_path, map_location="cpu"))
     model.eval()
-    print(f"Loaded model from {args.model_path}")
+    print(f"Loaded model from {weights_path}")
 
     processor = SimpleImageProcessor()
 

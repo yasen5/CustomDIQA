@@ -43,5 +43,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(args.checkpoint_dir, exist_ok=True)
-    args.save_path = os.path.join(args.checkpoint_dir, f"run_{timestamp}_steps{args.steps}.pt")
+    args.save_path = os.path.join(args.checkpoint_dir, f"run_{timestamp}_steps{args.steps}")
     train(args)

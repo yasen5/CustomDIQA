@@ -1,5 +1,6 @@
 import os
 import random
+import shutil
 import signal
 import sys
 import types
@@ -122,7 +123,12 @@ def train(args):
         if any(p.isnan().any().item() for p in model.parameters()):
             print("WARNING: NaN in weights — skipping save")
             return
-        torch.save(model.state_dict(), args.save_path)
+        os.makedirs(args.save_path, exist_ok=True)
+        weights_path = os.path.join(args.save_path, "weights.pt")
+        torch.save(model.state_dict(), weights_path)
+        for src in ("src/constants.py", "src/model/constants.py"):
+            dst_name = "model_constants.py" if src.endswith("model/constants.py") else "constants.py"
+            shutil.copy2(src, os.path.join(args.save_path, dst_name))
         if not quiet:
             print(f"Saved to {args.save_path}")
 
@@ -215,7 +221,7 @@ def train(args):
     ax.plot(plot_steps, plot_ema, color="steelblue", linewidth=2, label="EMA loss")
     ax.legend()
     fig.tight_layout()
-    loss_plot_path = os.path.splitext(args.save_path)[0] + "_loss.png"
+    loss_plot_path = os.path.join(args.save_path, "loss.png")
     fig.savefig(loss_plot_path, dpi=100)
     plt.close(fig)
     print(f"Loss curve saved to {loss_plot_path}", flush=True)
