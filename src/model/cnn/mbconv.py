@@ -43,16 +43,16 @@ class MBConvBlock(nn.Module):
         if not self.training or self.drop_connect_rate == 0.0:
             return feature_map
         keep_prob = 1.0 - self.drop_connect_rate
-        random_tensor = keep_prob + torch.rand(feature_map.size(0), 1, 1, 1, device=feature_map.device, dtype=feature_map.dtype)
-        return feature_map / keep_prob * random_tensor.floor()
+        random_tensor = keep_prob + torch.rand(feature_map.size(0), 1, 1, 1, device=feature_map.device, dtype=feature_map.dtype) # (batch_size, 1, 1, 1)
+        return feature_map / keep_prob * random_tensor.floor() # (batch_size, out_channels, H, W)
 
     def forward(self, feature_map: torch.Tensor) -> torch.Tensor:
-        out = feature_map
+        out = feature_map # (batch_size, in_channels, H, W)
         if self.expand is not None:
-            out = self.expand(out)
-        out = self.depthwise(out)
-        out = self.squeeze_excite(out)
-        out = self.project(out)
+            out = self.expand(out) # (batch_size, expanded_channels, H, W)
+        out = self.depthwise(out) # (batch_size, expanded_channels, H / stride, W / stride)
+        out = self.squeeze_excite(out) # (batch_size, expanded_channels, H / stride, W / stride)
+        out = self.project(out) # (batch_size, out_channels, H / stride, W / stride)
         if self.use_residual:
-            out = feature_map + self._drop_connect(out)
+            out = feature_map + self._drop_connect(out) # (batch_size, out_channels, H, W)
         return out

@@ -14,6 +14,6 @@ class SqueezeExcite(nn.Module):
 
     def forward(self, feature_map: torch.Tensor) -> torch.Tensor:
         squeezed = self.pool(feature_map) # (batch_size, expanded_channels, 1, 1)
-        squeezed = self.activation(self.reduce(squeezed))
-        squeezed = self.gate(self.expand(squeezed))
-        return feature_map * squeezed
+        squeezed = self.activation(self.reduce(squeezed)) # (batch_size, squeeze_channels, 1, 1)
+        squeezed = self.gate(self.expand(squeezed)) # (batch_size, expanded_channels, 1, 1)
+        return feature_map * squeezed # (batch_size, expanded_channels, H, W)

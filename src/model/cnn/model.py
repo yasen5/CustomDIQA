@@ -49,7 +49,7 @@ class EfficientNet(nn.Module):
         out = self.blocks(out) # (batch_size, last_stage_channels, img_size / 32, img_size / 32)
         out = self.head_conv(out) # (batch_size, head_channels, img_size / 32, img_size / 32)
         out = self.pool(out).flatten(1) # (batch_size, head_channels)
-        out = self.head(out)
+        out = self.head(out) # (batch_size, 5)
         return out
 
     def _init_weights(self, module):

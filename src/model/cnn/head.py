@@ -12,8 +12,8 @@ class MeanOpinionScoreHead(nn.Module):
         self.dense2 = nn.Linear(intermediate_dim, 5)
 
     def forward(self, pooled_features: torch.Tensor) -> torch.Tensor:
-        out = self.dropout(pooled_features)
-        out = self.dense1(out)
-        out = self.activation(out)
-        out = self.dense2(out)
+        out = self.dropout(pooled_features) # (batch_size, head_channels)
+        out = self.dense1(out) # (batch_size, intermediate_dim)
+        out = self.activation(out) # (batch_size, intermediate_dim)
+        out = self.dense2(out) # (batch_size, 5)
         return out
