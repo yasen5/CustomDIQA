@@ -13,11 +13,19 @@ MODEL_REGISTRY = {
 MODEL_TYPE_FILENAME = "model_type.txt"
 
 
-def build_model(model_type: str):
+def build_model(model_type: str, pretrained: str | None = None):
     if model_type not in MODEL_REGISTRY:
         raise ValueError(f"Unknown model type {model_type!r}, expected one of {list(MODEL_REGISTRY)}")
     model_class, constants = MODEL_REGISTRY[model_type]
-    return model_class(), constants
+    model = model_class()
+    if pretrained == "dinov2":
+        if model_type != "vit":
+            raise ValueError("--pretrained dinov2 is only supported for --model-type vit")
+        from .vit.pretrained import load_dinov2_partial
+        load_dinov2_partial(model)
+    elif pretrained is not None:
+        raise ValueError(f"Unknown pretrained option {pretrained!r}")
+    return model, constants
 
 
 def save_model_type(checkpoint_dir: str, model_type: str):

@@ -11,6 +11,7 @@ class EncoderModel(nn.Module):
         self.layers = nn.Sequential(*(layer.EncoderLayer() for _ in range(constants.num_vit_layers)))
         self.final_encoder_layernorm = nn.LayerNorm(constants.embedding_channels, eps=constants.layer_norm_epsilon)
         self.head = head.MeanOpinionScoreHead()
+        self.apply(self._init_weights)
 
     def forward(self, rgb_image: torch.FloatTensor) -> torch.Tensor:
         embeddings = self.embedding(rgb_image) # (batch_size, out_ch, 3, 14, 14) over (batch_size, 3, 488, 488) = (batch_size, out_ch, 32, 32)
@@ -23,9 +24,7 @@ class EncoderModel(nn.Module):
         return out
 
     def _init_weights(self, module):
-        # Target only specific layers like Linear or Conv2d
-        if isinstance(module, nn.Linear):
+        if isinstance(module, (nn.Linear, nn.Conv2d)):
             nn.init.xavier_uniform_(module.weight)
-            # Biases are usually initialized to zero or small values
             if module.bias is not None:
                 nn.init.zeros_(module.bias)

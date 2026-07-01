@@ -18,13 +18,22 @@ class SimpleImageProcessor:
     image_mean = [0.485, 0.456, 0.406]
     image_std = [0.229, 0.224, 0.225]
 
-    def __init__(self, img_size):
+    def __init__(self, img_size, augment=False):
         self.crop_size = {"height": img_size, "width": img_size}
-        self._transform = transforms.Compose([
-            transforms.Resize((img_size, img_size)),
+        steps = []
+        if augment:
+            # Mild only: aggressive crop/color-jitter can corrupt or crop out
+            # the very distortions (blur/noise/compression) IQA labels are about.
+            steps.append(transforms.Resize((int(img_size * 1.14), int(img_size * 1.14))))
+            steps.append(transforms.RandomCrop((img_size, img_size)))
+            steps.append(transforms.RandomHorizontalFlip(p=0.5))
+        else:
+            steps.append(transforms.Resize((img_size, img_size)))
+        steps += [
             transforms.ToTensor(),
             transforms.Normalize(mean=self.image_mean, std=self.image_std),
-        ])
+        ]
+        self._transform = transforms.Compose(steps)
 
     def preprocess(self, image, return_tensors="pt"):
         return {"pixel_values": self._transform(image).unsqueeze(0)}
@@ -51,10 +60,25 @@ class OscillationAwareLR:
         self._ema_osc = 0.0
         self._steps_since_reduce = cooldown
         self._base_lrs = [pg["lr"] for pg in optimizer.param_groups]
+        self._backbone_group_idx = None
+        self._backbone_warmup_start = 0
+        self._backbone_warmup_steps = 0
 
     @property
     def ema_osc(self):
         return self._ema_osc
+
+    def begin_backbone_warmup(self, step, group_idx, warmup_steps):
+        """Re-warms only `group_idx`'s LR from 0 over `warmup_steps`, starting
+        at `step` (e.g. right after unfreezing a previously-frozen backbone
+        param group), and resets the oscillation EMA so the legitimate
+        one-time loss shift at unfreeze isn't read as instability."""
+        self._backbone_group_idx = group_idx
+        self._backbone_warmup_start = step
+        self._backbone_warmup_steps = warmup_steps
+        self._ema_loss = None
+        self._ema_osc = 0.0
+        self._steps_since_reduce = self.cooldown
 
     def step(self, loss):
         self._global_step += 1
@@ -63,6 +87,14 @@ class OscillationAwareLR:
             for pg, base_lr in zip(self.optimizer.param_groups, self._base_lrs):
                 pg["lr"] = base_lr * scale
             return
+        if self._backbone_group_idx is not None:
+            elapsed = self._global_step - self._backbone_warmup_start
+            if elapsed <= self._backbone_warmup_steps:
+                scale = elapsed / max(1, self._backbone_warmup_steps)
+                pg = self.optimizer.param_groups[self._backbone_group_idx]
+                pg["lr"] = self._base_lrs[self._backbone_group_idx] * scale
+                return
+            self._backbone_group_idx = None
         if self._ema_loss is None:
             self._ema_loss = loss
         else:
@@ -94,7 +126,7 @@ def train(args):
     device = get_device()
     print(f"Device: {device}")
 
-    model, model_constants = build_model(args.model_type)
+    model, model_constants = build_model(args.model_type, pretrained=args.pretrained)
     model = model.to(device=device, dtype=torch.float32)
     if args.checkpoint_path is not None:
         if os.path.isdir(args.checkpoint_path):
@@ -107,21 +139,28 @@ def train(args):
             weights_path = os.path.join(args.checkpoint_path, "weights.pt")
         else:
             weights_path = args.checkpoint_path
+        if args.pretrained is not None:
+            print(f"NOTE: --checkpoint-path resume overwrites the --pretrained {args.pretrained} transfer"
+                  " unless this checkpoint itself came from a --pretrained run.")
         model.load_state_dict(torch.load(weights_path, map_location=device))
         print(f"Loaded model from {weights_path}")
     model.train()
 
     head_params = list(model.head.parameters())
     backbone_params = [p for p in model.parameters() if not any(p is h for h in head_params)]
-    if args.backbone_lr_scale != 1.0:
-        optimizer = torch.optim.Adam([
-            {"params": head_params, "lr": args.lr},
-            {"params": backbone_params, "lr": args.lr * args.backbone_lr_scale},
-        ])
-        print(f"  Head LR: {args.lr:.1e}  Backbone LR: {args.lr * args.backbone_lr_scale:.1e}"
-              f" (scale {args.backbone_lr_scale})")
-    else:
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW([
+        {"params": head_params, "lr": args.lr, "weight_decay": args.head_weight_decay},
+        {"params": backbone_params, "lr": args.lr * args.backbone_lr_scale, "weight_decay": args.weight_decay},
+    ])
+    print(f"  Head LR: {args.lr:.1e} (wd {args.head_weight_decay})  "
+          f"Backbone LR: {args.lr * args.backbone_lr_scale:.1e} (scale {args.backbone_lr_scale}, wd {args.weight_decay})")
+
+    backbone_frozen = args.freeze_backbone_steps > 0
+    if backbone_frozen:
+        for p in backbone_params:
+            p.requires_grad_(False)
+        print(f"  Backbone frozen for first {args.freeze_backbone_steps} steps"
+              f" ({sum(p.numel() for p in backbone_params)} params)")
 
     scheduler = OscillationAwareLR(
         optimizer,
@@ -155,7 +194,7 @@ def train(args):
 
     signal.signal(signal.SIGINT, _sigint_handler)
 
-    processor = SimpleImageProcessor(model_constants.img_size)
+    processor = SimpleImageProcessor(model_constants.img_size, augment=args.augment)
     data_args = types.SimpleNamespace(
         data_paths=[args.data_path],
         data_weights=[1],
@@ -198,6 +237,13 @@ def train(args):
     random.seed(args.sample_seed)
 
     for step in range(1, args.steps + 1):
+        if backbone_frozen and step > args.freeze_backbone_steps:
+            for p in backbone_params:
+                p.requires_grad_(True)
+            backbone_frozen = False
+            scheduler.begin_backbone_warmup(step, group_idx=1, warmup_steps=args.backbone_warmup_steps)
+            print(f"  [unfreeze] step {step}: backbone unfrozen (LR scale {args.backbone_lr_scale})")
+
         step_loss = 0.0
         for _ in range(accum):
             indices = random.sample(pool_indices, args.batch_size)
