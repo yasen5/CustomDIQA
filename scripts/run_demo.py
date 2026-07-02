@@ -119,6 +119,7 @@ def demo(args):
             print(f"{title:<30}  pred={score:.2f}  gt={gt_score:.2f}")
 
     if args.out:
+        os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
         make_plot(titles, images, gt_scores, gt_probs_list, pred_probs, pred_scores, args.out, iqa_model.model_type)
 
 

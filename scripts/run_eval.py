@@ -148,9 +148,11 @@ def evaluate(args):
     print_table(results, pooled)
 
     if args.out:
+        os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
         make_plot(results, args.out, iqa_model.model_type)
 
     if args.out_json:
+        os.makedirs(os.path.dirname(args.out_json) or ".", exist_ok=True)
         with open(args.out_json, "w") as f:
             json.dump({"model_path": args.model_path, "model_type": iqa_model.model_type,
                        "split": args.split, "per_dataset": results, "pooled": pooled}, f, indent=2)

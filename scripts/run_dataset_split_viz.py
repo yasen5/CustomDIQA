@@ -11,9 +11,11 @@ from PIL import Image
 
 sys.path.insert(0, ".")
 from src.constants import DATA_DEQA_SCORE_DIR_DEFAULT
+from src.constants import analysis_result_path
 
 SAMPLE_COUNT_DEFAULT = 5
-OUT_DEFAULT = "dataset_split_samples.png"
+INPUT_JSON_DEFAULT = analysis_result_path("dataset_split_failures.json")
+OUT_DEFAULT = analysis_result_path("dataset_split_samples.png")
 
 
 def make_grid(failures, successes, image_folder, out_path):
@@ -37,6 +39,7 @@ def make_grid(failures, successes, image_folder, out_path):
         axes[row_idx][0].set_ylabel(label, fontsize=12)
 
     fig.tight_layout()
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
     print(f"Saved to {out_path}")
@@ -60,7 +63,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Samples images from each bucket of a run_dataset_split.py output "
                      "(failures/successes) and shows them side-by-side in a grid image")
-    parser.add_argument("--input-json", default="dataset_split_failures.json",
+    parser.add_argument("--input-json", default=INPUT_JSON_DEFAULT,
                         help="Path to the run_dataset_split.py output JSON")
     parser.add_argument("--data-root", default=DATA_DEQA_SCORE_DIR_DEFAULT,
                         help="Path to the Data-DeQA-Score directory (image root)")

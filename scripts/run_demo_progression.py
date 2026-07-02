@@ -16,6 +16,7 @@ from src.constants import (
     DEMO_GT_COLOR,
     DEMO_PRED_COLOR,
     DEMO_SEED_DEFAULT,
+    analysis_result_path,
     resolve_dataset_paths,
 )
 from src.datasets.gen_soft_label import load_soft_label_samples
@@ -99,6 +100,7 @@ def demo(args):
         ax_plot.legend(fontsize=8)
         ax_plot.grid(alpha=0.25)
 
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     fig.savefig(args.out, dpi=150, bbox_inches="tight")
     print(f"Saved to {args.out}")
 
@@ -110,6 +112,6 @@ if __name__ == "__main__":
                          help="Path to the Data-DeQA-Score directory (doubles as the image root)")
     parser.add_argument("--num-sets", type=int, default=3, help="Number of distortion progressions to show")
     parser.add_argument("--seed", type=int, default=DEMO_SEED_DEFAULT)
-    parser.add_argument("--out", default="demo_kadid_progression.png")
+    parser.add_argument("--out", default=analysis_result_path("demo_kadid_progression.png"))
     args = parser.parse_args()
     demo(args)

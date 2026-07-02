@@ -10,6 +10,7 @@ import torch
 import torch.nn.functional as F
 from torchvision import transforms
 
+from src.constants import ANALYSIS_RESULTS_DIR
 from src.datasets.single_dataset import SingleDataset
 from src.model import build_model, load_checkpoint, load_model_type, save_model_type
 
@@ -299,7 +300,9 @@ def train(args):
     ax.plot(plot_steps, plot_ema, color="steelblue", linewidth=2, label="EMA loss")
     ax.legend()
     fig.tight_layout()
-    loss_plot_path = os.path.join(args.save_path, "loss.png")
+    os.makedirs(ANALYSIS_RESULTS_DIR, exist_ok=True)
+    run_name = os.path.basename(os.path.normpath(args.save_path))
+    loss_plot_path = os.path.join(ANALYSIS_RESULTS_DIR, f"{run_name}_loss.png")
     fig.savefig(loss_plot_path, dpi=100)
     plt.close(fig)
     print(f"Loss curve saved to {loss_plot_path}", flush=True)

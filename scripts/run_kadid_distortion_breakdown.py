@@ -19,6 +19,7 @@ from src.constants import (
     EVAL_SRCC_COLOR,
     KADID_DISTORTION_NAMES,
     TRAIN_SAMPLE_SEED_DEFAULT,
+    analysis_result_path,
     resolve_dataset_paths,
 )
 from src.datasets.gen_soft_label import calculate_srcc_plcc, load_soft_label_samples
@@ -27,9 +28,9 @@ import script_utils
 
 FAILURE_THRESHOLD_DEFAULT = 1.0
 SUCCESS_THRESHOLD_DEFAULT = 0.1
-OUT_TYPE_PLOT_DEFAULT = "kadid_distortion_breakdown.png"
-OUT_LEVEL_PLOT_DEFAULT = "kadid_level_breakdown.png"
-OUT_JSON_DEFAULT = "kadid_distortion_breakdown.json"
+OUT_TYPE_PLOT_DEFAULT = analysis_result_path("kadid_distortion_breakdown.png")
+OUT_LEVEL_PLOT_DEFAULT = analysis_result_path("kadid_level_breakdown.png")
+OUT_JSON_DEFAULT = analysis_result_path("kadid_distortion_breakdown.json")
 
 # KADID images are named "I<ref>_<distortion 01-25>_<level 01-05>.png", e.g. "I48_16_05.png".
 KADID_FILENAME_RE = re.compile(r"^I\d+_(\d+)_(\d+)\.png$")
@@ -154,6 +155,7 @@ def _bar_plot(labels, mean_errors, failure_rates, out_path, title):
     ax.grid(axis="y", alpha=0.25, linewidth=0.8)
     ax.set_title(f"{title} (numbers above bars = failure rate)")
     fig.tight_layout()
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
     print(f"Chart saved to {out_path}")
@@ -215,6 +217,7 @@ def main(args):
             for t, m in sorted(by_type.items())
         ]
         by_level_list = [{"level": level, **by_level[level]} for level in sorted(by_level)]
+        os.makedirs(os.path.dirname(args.out_json) or ".", exist_ok=True)
         with open(args.out_json, "w") as f:
             json.dump({
                 "model_path": args.model_path,

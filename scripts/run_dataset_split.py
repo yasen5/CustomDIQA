@@ -12,6 +12,7 @@ from src.constants import (
     EVAL_BATCH_SIZE_DEFAULT,
     EVAL_SPLIT_DEFAULT,
     TRAIN_SAMPLE_SEED_DEFAULT,
+    analysis_result_path,
     resolve_dataset_paths,
 )
 from src.datasets.gen_soft_label import load_soft_label_samples
@@ -91,6 +92,7 @@ def main(args):
     if args.target_count is not None and (len(failures) < args.target_count or len(successes) < args.target_count):
         print(f"WARNING: ran out of pooled samples before reaching --target-count {args.target_count} on both sides")
 
+    os.makedirs(os.path.dirname(args.out_json) or ".", exist_ok=True)
     with open(args.out_json, "w") as f:
         json.dump({
             "model_path": args.model_path,
@@ -126,7 +128,7 @@ if __name__ == "__main__":
     parser.add_argument("--target-count", type=int, default=None,
                         help="Stop once both the failure and success buckets reach this many images "
                              "(processes every pooled sample if omitted)")
-    parser.add_argument("--out-json", default="dataset_split_failures.json",
+    parser.add_argument("--out-json", default=analysis_result_path("dataset_split_failures.json"),
                         help="Path to write the failure/success image lists")
     args = parser.parse_args()
     args.dataset_keys, args.data_path = resolve_dataset_paths(args.datasets, args.exclude_datasets, args.data_root, args.split)

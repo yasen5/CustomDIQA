@@ -1,10 +1,15 @@
 import os
 
 LOG_DIR = "./logs/"
+ANALYSIS_RESULTS_DIR = "analysis-results"
+
+
+def analysis_result_path(filename):
+    return os.path.join(ANALYSIS_RESULTS_DIR, filename)
 
 DEMO_NUM_SAMPLES_DEFAULT = 16
 DEMO_SEED_DEFAULT = 0
-DEMO_OUT_DEFAULT = "demo.png"
+DEMO_OUT_DEFAULT = analysis_result_path("demo.png")
 DEMO_LEVELS = ["Excellent", "Good", "Fair", "Poor", "Bad"]
 DEMO_PRED_COLOR = "steelblue"
 DEMO_GT_COLOR = "coral"
@@ -22,7 +27,7 @@ KADID_DISTORTION_NAMES = [
 
 EVAL_BATCH_SIZE_DEFAULT = 16
 EVAL_SPLIT_DEFAULT = "test"
-EVAL_OUT_DEFAULT = "eval_cross_dataset.png"
+EVAL_OUT_DEFAULT = analysis_result_path("eval_cross_dataset.png")
 EVAL_SRCC_COLOR = "steelblue"
 EVAL_PLCC_COLOR = "coral"
 
@@ -66,7 +71,8 @@ IQA_DATASET_ARCHIVES = {
     "agiqa3k": ("AGIQA-3K.zip", "AGIQA3K"),
 }
 DATA_DEQA_SCORE_DIR_DEFAULT = "data/Data-DeQA-Score"
-DATASET_KEYS_DEFAULT = sorted(IQA_DATASET_ARCHIVES.keys())
+DATASET_KEYS = sorted(IQA_DATASET_ARCHIVES.keys())
+DATASET_KEYS_DEFAULT = [key for key in DATASET_KEYS if key != "kadid"]
 
 # metas/*.json filenames actually shipped per dataset — not uniform. koniq/spaq/kadid use
 # the train.json/test.json this repo generates (see generate_soft_labels below); pipal
@@ -84,22 +90,22 @@ DATASET_META_FILENAMES = {
 }
 
 # Shared by run_train.py and run_demo.py: dataset selection defaults to every dataset
-# with downloadable images (IQA_DATASET_ARCHIVES), excluded from rather than opted into.
+# with downloadable images except KADID, excluded from rather than opted into.
 DATASET_SELECT_ARG_SPECS = [
     {
         "flags": ["--datasets"],
         "kwargs": {
             "nargs": "+",
-            "choices": DATASET_KEYS_DEFAULT,
+            "choices": DATASET_KEYS,
             "default": DATASET_KEYS_DEFAULT,
-            "help": "Datasets to use (default: all datasets with downloadable images)",
+            "help": "Datasets to use (default: all datasets with downloadable images except kadid)",
         },
     },
     {
         "flags": ["--exclude-datasets"],
         "kwargs": {
             "nargs": "+",
-            "choices": DATASET_KEYS_DEFAULT,
+            "choices": DATASET_KEYS,
             "default": [],
             "help": "Datasets to exclude from --datasets",
         },
@@ -186,7 +192,7 @@ DOWNLOAD_DATASETS_ARG_SPECS = [
         "flags": ["--datasets"],
         "kwargs": {
             "nargs": "+",
-            "choices": DATASET_KEYS_DEFAULT,
+            "choices": DATASET_KEYS,
             "default": None,
             "help": "Which datasets to download (default: all of them)",
         },
