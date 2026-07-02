@@ -1,6 +1,6 @@
 LOG_DIR = "./logs/"
 
-DEMO_NUM_SAMPLES_DEFAULT = 4
+DEMO_NUM_SAMPLES_DEFAULT = 16
 DEMO_SEED_DEFAULT = 0
 DEMO_OUT_DEFAULT = "demo.png"
 DEMO_LEVELS = ["Excellent", "Good", "Fair", "Poor", "Bad"]

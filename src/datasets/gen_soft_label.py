@@ -182,8 +182,8 @@ def main(cfg):
             gt_score_norm=float(mos_norm),
             std=std,
             std_norm=float(std_norm),
-            level_probs=probs_norm if training else None,
-            level_probs_org=probs if training else None,
+            level_probs=probs_norm,
+            level_probs_org=probs,
         )
         if training:
             train_metas.append(meta)
