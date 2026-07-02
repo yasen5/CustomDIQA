@@ -72,9 +72,10 @@ if __name__ == "__main__":
     parser.add_argument("--backbone-warmup-steps", type=int, default=TRAIN_BACKBONE_WARMUP_STEPS_DEFAULT,
                         help="LR re-warmup steps for the backbone group after it unfreezes")
     parser.add_argument("--pretrained", choices=PRETRAINED_TYPES, default=TRAIN_PRETRAINED_DEFAULT,
-                        help="Partially initialize the backbone from an external pretrained model "
-                             "(first N transformer blocks + patch-embed). One-time network fetch on "
-                             "first use, cached afterward.")
+                        help="Initialize the backbone from an external pretrained model: "
+                             "'dinov2' (vit only, first N transformer blocks + patch-embed) or "
+                             "'imagenet' (cnn only, full EfficientNet-B0 backbone transfer). "
+                             "One-time network fetch on first use, cached afterward.")
     parser.add_argument("--augment", action="store_true",
                         help="Apply mild random-crop + horizontal-flip augmentation (recommended for vit)")
     parser.add_argument("--sample-size", type=int, default=None,

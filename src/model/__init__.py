@@ -25,6 +25,11 @@ def build_model(model_type: str, pretrained: str | None = None):
             raise ValueError("--pretrained dinov2 is only supported for --model-type vit")
         from .vit.pretrained import load_dinov2_partial
         load_dinov2_partial(model)
+    elif pretrained == "imagenet":
+        if model_type != "cnn":
+            raise ValueError("--pretrained imagenet is only supported for --model-type cnn")
+        from .cnn.pretrained import load_imagenet_efficientnet_b0
+        load_imagenet_efficientnet_b0(model)
     elif pretrained is not None:
         raise ValueError(f"Unknown pretrained option {pretrained!r}")
     return model, constants
