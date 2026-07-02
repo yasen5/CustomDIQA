@@ -1,3 +1,5 @@
+import os
+
 LOG_DIR = "./logs/"
 
 DEMO_NUM_SAMPLES_DEFAULT = 16
@@ -47,6 +49,74 @@ IQA_DATASET_ARCHIVES = {
     "agiqa3k": ("AGIQA-3K.zip", "AGIQA3K"),
 }
 DATA_DEQA_SCORE_DIR_DEFAULT = "data/Data-DeQA-Score"
+DATASET_KEYS_DEFAULT = sorted(IQA_DATASET_ARCHIVES.keys())
+
+# metas/*.json filenames actually shipped per dataset — not uniform. koniq/spaq/kadid use
+# the train.json/test.json this repo generates (see generate_soft_labels below); pipal
+# ships its own pre-built train/test metas; tid2013/csiq/livewild/agiqa3k ship test-only
+# benchmark metas with no train split and no level_probs (eval-only, see resolve_dataset_paths).
+DATASET_META_FILENAMES = {
+    "koniq": {"train": "train.json", "test": "test.json"},
+    "spaq": {"train": "train.json", "test": "test.json"},
+    "kadid": {"train": "train.json", "test": "test.json"},
+    "pipal": {"train": "train_pipal_19k.json", "test": "test_pipal_5k.json"},
+    "tid2013": {"train": None, "test": "test_tid2013_3k.json"},
+    "csiq": {"train": None, "test": "test_csiq_866.json"},
+    "livewild": {"train": None, "test": "test_livew_1k.json"},
+    "agiqa3k": {"train": None, "test": "test_agiqa_3k.json"},
+}
+
+# Shared by run_train.py and run_demo.py: dataset selection defaults to every dataset
+# with downloadable images (IQA_DATASET_ARCHIVES), excluded from rather than opted into.
+DATASET_SELECT_ARG_SPECS = [
+    {
+        "flags": ["--datasets"],
+        "kwargs": {
+            "nargs": "+",
+            "choices": DATASET_KEYS_DEFAULT,
+            "default": DATASET_KEYS_DEFAULT,
+            "help": "Datasets to use (default: all datasets with downloadable images)",
+        },
+    },
+    {
+        "flags": ["--exclude-datasets"],
+        "kwargs": {
+            "nargs": "+",
+            "choices": DATASET_KEYS_DEFAULT,
+            "default": [],
+            "help": "Datasets to exclude from --datasets",
+        },
+    },
+    {
+        "flags": ["--data-root"],
+        "kwargs": {
+            "default": DATA_DEQA_SCORE_DIR_DEFAULT,
+            "help": "Path to the Data-DeQA-Score directory containing <DATASET>/metas/*.json "
+                    "(doubles as the shared image root)",
+        },
+    },
+]
+
+
+def resolve_dataset_paths(datasets, exclude_datasets, data_root, split):
+    """Turn --datasets/--exclude-datasets/--data-root into (keys, meta json paths) for
+    `split` ("train" or "test"), per the real per-dataset filenames in DATASET_META_FILENAMES.
+    Datasets with no meta file for `split` (e.g. the test-only benchmark sets have no train
+    split) are skipped rather than erroring, since --datasets defaults to every dataset."""
+    keys, paths = [], []
+    for k in datasets:
+        if k in exclude_datasets:
+            continue
+        filename = DATASET_META_FILENAMES[k][split]
+        if filename is None:
+            print(f"NOTE: {k} has no {split!r} split, skipping.")
+            continue
+        keys.append(k)
+        paths.append(os.path.join(data_root, IQA_DATASET_ARCHIVES[k][1], "metas", filename))
+    if not keys:
+        raise ValueError(f"No selected dataset has a {split!r} split (after --exclude-datasets)")
+    return keys, paths
+
 
 # Soft-label generation (see src/datasets/gen_soft_label.py) needs each dataset's raw
 # mos.json + split.json, which only the "authentic distortion" MOS datasets ship —
@@ -64,7 +134,7 @@ DOWNLOAD_DATASETS_ARG_SPECS = [
         "flags": ["--datasets"],
         "kwargs": {
             "nargs": "+",
-            "choices": sorted(IQA_DATASET_ARCHIVES.keys()),
+            "choices": DATASET_KEYS_DEFAULT,
             "default": None,
             "help": "Which datasets to download (default: all of them)",
         },

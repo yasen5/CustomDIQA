@@ -5,6 +5,7 @@ from datetime import datetime
 
 sys.path.insert(0, ".")
 from src.constants import (
+    DATASET_SELECT_ARG_SPECS,
     MODEL_TYPES,
     PRETRAINED_TYPES,
     TRAIN_BACKBONE_LR_SCALE_DEFAULT,
@@ -27,18 +28,16 @@ from src.constants import (
     TRAIN_VIT_WARMUP_STEPS_DEFAULT,
     TRAIN_WARMUP_STEPS_DEFAULT,
     TRAIN_WEIGHT_DECAY_DEFAULT,
+    resolve_dataset_paths,
 )
 from src.trainer import train
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-path", required=True, nargs="+",
-                        help="One or more dataset meta json paths, trained on jointly")
+    for arg_spec in DATASET_SELECT_ARG_SPECS:
+        parser.add_argument(*arg_spec["flags"], **arg_spec["kwargs"])
     parser.add_argument("--data-weights", type=int, nargs="+", default=None,
-                        help="Integer replication weight per --data-path entry (default: 1 each)")
-    parser.add_argument("--image-folder", required=True,
-                        help="Shared image root; each meta json's 'image' field already includes "
-                             "its dataset-specific subdirectory")
+                        help="Integer replication weight per selected dataset (default: 1 each)")
     parser.add_argument("--model-type", choices=MODEL_TYPES, default=TRAIN_MODEL_TYPE_DEFAULT,
                         help="Backbone architecture to train")
     parser.add_argument("--checkpoint-dir", default="checkpoints")
@@ -83,6 +82,9 @@ if __name__ == "__main__":
     parser.add_argument("--sample-seed", type=int, default=TRAIN_SAMPLE_SEED_DEFAULT,
                         help="Seed for subset selection and mini-batch sampling")
     args = parser.parse_args()
+
+    _, args.data_path = resolve_dataset_paths(args.datasets, args.exclude_datasets, args.data_root, "train")
+    args.image_folder = args.data_root
 
     if args.data_weights is None:
         args.data_weights = [1] * len(args.data_path)

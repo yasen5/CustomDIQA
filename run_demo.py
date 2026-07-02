@@ -14,6 +14,7 @@ from PIL import Image
 
 sys.path.insert(0, ".")
 from src.constants import (
+    DATASET_SELECT_ARG_SPECS,
     DEMO_GT_COLOR,
     DEMO_LEVELS,
     DEMO_NUM_SAMPLES_DEFAULT,
@@ -21,6 +22,7 @@ from src.constants import (
     DEMO_PRED_COLOR,
     DEMO_SEED_DEFAULT,
     TRAIN_SAMPLE_SEED_DEFAULT,
+    resolve_dataset_paths,
 )
 from src.datasets.gen_soft_label import load_soft_label_samples
 from src.model import build_model, load_checkpoint, load_model_type
@@ -102,24 +104,38 @@ def demo(args):
 
     processor = SimpleImageProcessor(model_constants.img_size)
 
-    # Replicate the exact pool the trainer used (same filtering + same RNG).
-    all_data = [s for s in load_soft_label_samples(args.data_path) if s.level_probs is not None]
+    # Pool samples across every selected dataset's --split. With --split train and
+    # matching --sample-size/--sample-seed, this replicates the exact pool the trainer used.
+    all_data = []
+    for path in args.data_path:
+        all_data += [s for s in load_soft_label_samples(path) if s.level_probs is not None]
     if args.sample_size is not None:
         pool_indices = random.Random(args.sample_seed).sample(range(len(all_data)), args.sample_size)
     else:
         pool_indices = list(range(len(all_data)))
     pool = [all_data[i] for i in pool_indices]
-    print(f"Training pool: {len(pool)} samples")
+    print(f"Pool: {len(pool)} samples from {len(args.data_path)} dataset(s) ({args.split} split)")
 
-    chosen = random.Random(args.seed).sample(pool, min(args.num_samples, len(pool)))
+    shuffled = pool[:]
+    random.Random(args.seed).shuffle(shuffled)
 
     titles, images, gt_scores, gt_probs_list = [], [], [], []
-    for s in chosen:
-        img = Image.open(os.path.join(args.image_folder, s.image)).convert("RGB")
+    for s in shuffled:
+        if len(titles) >= args.num_samples:
+            break
+        try:
+            img = Image.open(os.path.join(args.image_folder, s.image)).convert("RGB")
+        except (FileNotFoundError, OSError) as ex:
+            print(f"WARNING: skipping {s.image}: {ex}")
+            continue
         titles.append(os.path.basename(s.image))
         images.append(img)
         gt_scores.append(s.gt_score_norm)
         gt_probs_list.append(s.level_probs)
+
+    if len(titles) < args.num_samples:
+        print(f"WARNING: only found {len(titles)}/{args.num_samples} requested images "
+              f"(some dataset images may not be downloaded locally)")
 
     pred_probs, pred_scores = run_model(model, processor, images, device)
 
@@ -136,14 +152,20 @@ if __name__ == "__main__":
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--model-type", choices=["vit", "cnn"], default=None,
                         help="Overrides the checkpoint's recorded model type; required if --model-path is a weights file")
-    parser.add_argument("--data-path", required=True)
-    parser.add_argument("--image-folder", required=True)
+    for arg_spec in DATASET_SELECT_ARG_SPECS:
+        parser.add_argument(*arg_spec["flags"], **arg_spec["kwargs"])
+    parser.add_argument("--split", choices=["train", "test"], default="test",
+                        help="Pool samples from each dataset's train or test split")
     parser.add_argument("--sample-size", type=int, default=None,
-                        help="Must match --sample-size used during training")
+                        help="Subsample the pool to this many samples before drawing --num-samples; "
+                             "with --split train, must match --sample-size used during training to "
+                             "replicate its exact pool")
     parser.add_argument("--sample-seed", type=int, default=TRAIN_SAMPLE_SEED_DEFAULT,
-                        help="Must match --sample-seed used during training")
+                        help="Must match --sample-seed used during training if replicating its pool")
     parser.add_argument("--num-samples", type=int, default=DEMO_NUM_SAMPLES_DEFAULT)
     parser.add_argument("--seed", type=int, default=DEMO_SEED_DEFAULT)
     parser.add_argument("--out", default=DEMO_OUT_DEFAULT)
     args = parser.parse_args()
+    _, args.data_path = resolve_dataset_paths(args.datasets, args.exclude_datasets, args.data_root, args.split)
+    args.image_folder = args.data_root
     demo(args)
