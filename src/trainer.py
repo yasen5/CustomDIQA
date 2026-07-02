@@ -4,6 +4,8 @@ import shutil
 import signal
 import sys
 import types
+from datetime import datetime
+from time import perf_counter
 
 import matplotlib.pyplot as plt
 import torch
@@ -252,8 +254,10 @@ def train(args):
     optimizer.zero_grad()
     running_loss = 0.0
     random.seed(args.sample_seed)
+    train_started_at = perf_counter()
 
     for step in range(1, args.steps + 1):
+        step_started_at = perf_counter()
         if backbone_frozen and step > args.freeze_backbone_steps:
             for p in backbone_params:
                 p.requires_grad_(True)
@@ -277,6 +281,12 @@ def train(args):
         optimizer.step()
         optimizer.zero_grad()
         scheduler.step(step_loss)
+
+        completed_at = datetime.now().isoformat(timespec="seconds")
+        step_elapsed = perf_counter() - step_started_at
+        total_elapsed = perf_counter() - train_started_at
+        print(f"  [perf] step {step}/{args.steps} completed_at {completed_at}"
+              f"  step_sec {step_elapsed:.3f}  total_sec {total_elapsed:.3f}", flush=True)
 
         running_loss = 0.9 * running_loss + 0.1 * step_loss if step > 1 else step_loss
         if step % args.log_every == 0 or step == 1:

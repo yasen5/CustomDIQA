@@ -20,6 +20,8 @@ import os
 import random
 import sys
 import types
+from datetime import datetime
+from time import perf_counter
 
 sys.path.insert(0, ".")
 import torch
@@ -99,7 +101,9 @@ if __name__ == "__main__":
     random.seed(args.sample_seed)
     print(f"\nRunning {args.burn_in_steps} real optimizer steps "
           f"(batch {args.batch_size}, grad-accum {args.grad_accum}) to populate Adam moments...")
+    burn_in_started_at = perf_counter()
     for step in range(1, args.burn_in_steps + 1):
+        step_started_at = perf_counter()
         step_loss = 0.0
         for _ in range(args.grad_accum):
             indices = random.sample(pool_indices, args.batch_size)
@@ -115,6 +119,11 @@ if __name__ == "__main__":
         optimizer.step()
         optimizer.zero_grad()
         print(f"  burn-in step {step}/{args.burn_in_steps}  loss {step_loss:.6f}", flush=True)
+        completed_at = datetime.now().isoformat(timespec="seconds")
+        step_elapsed = perf_counter() - step_started_at
+        total_elapsed = perf_counter() - burn_in_started_at
+        print(f"  [perf] burn-in step {step}/{args.burn_in_steps} completed_at {completed_at}"
+              f"  step_sec {step_elapsed:.3f}  total_sec {total_elapsed:.3f}", flush=True)
 
     # lr=0 means weights never moved — restore is just a safety net against
     # any float drift, and doubles as an assertion that nothing else changed them.
