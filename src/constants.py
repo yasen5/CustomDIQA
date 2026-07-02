@@ -104,11 +104,27 @@ DATASET_SELECT_ARG_SPECS = [
 ]
 
 
+def _usability_warning(key, split, reason):
+    banner = "!" * 100
+    print(banner)
+    print(f"!!! WARNING: dropping dataset {key!r} ({split} split) — {reason}")
+    print(f"!!! It will NOT be used for this run.")
+    print(banner)
+
+
 def resolve_dataset_paths(datasets, exclude_datasets, data_root, split):
     """Turn --datasets/--exclude-datasets/--data-root into (keys, meta json paths) for
     `split` ("train" or "test"), per the real per-dataset filenames in DATASET_META_FILENAMES.
     Datasets with no meta file for `split` (e.g. the test-only benchmark sets have no train
-    split) are skipped rather than erroring, since --datasets defaults to every dataset."""
+    split) are skipped rather than erroring, since --datasets defaults to every dataset.
+
+    Before accepting a dataset, checks that every image its metadata references actually
+    exists under `data_root` — an incomplete download/extract otherwise surfaces only
+    gradually, as a trickle of "image not found" warnings during training/eval. Any
+    mismatch drops the whole dataset (with a loud warning) rather than silently evaluating
+    on a partial, likely-biased subset of it."""
+    from src.datasets.gen_soft_label import load_soft_label_samples
+
     keys, paths = [], []
     for k in datasets:
         if k in exclude_datasets:
@@ -117,8 +133,27 @@ def resolve_dataset_paths(datasets, exclude_datasets, data_root, split):
         if filename is None:
             print(f"NOTE: {k} has no {split!r} split, skipping.")
             continue
+        path = os.path.join(data_root, IQA_DATASET_ARCHIVES[k][1], "metas", filename)
+
+        try:
+            samples = load_soft_label_samples(path)
+        except (OSError, ValueError) as ex:
+            _usability_warning(k, split, f"could not read metadata at {path}: {ex}")
+            continue
+
+        n_meta = len(samples)
+        n_found = sum(1 for s in samples if os.path.isfile(os.path.join(data_root, s.image)))
+        if n_found != n_meta:
+            _usability_warning(
+                k, split,
+                f"only {n_found}/{n_meta} images referenced in {path} were found on disk "
+                f"under {data_root!r}. This usually means the dataset was only partially "
+                f"downloaded/extracted."
+            )
+            continue
+
         keys.append(k)
-        paths.append(os.path.join(data_root, IQA_DATASET_ARCHIVES[k][1], "metas", filename))
+        paths.append(path)
     if not keys:
         raise ValueError(f"No selected dataset has a {split!r} split (after --exclude-datasets)")
     return keys, paths
