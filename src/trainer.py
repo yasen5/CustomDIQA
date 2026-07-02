@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from torchvision import transforms
 
 from src.datasets.single_dataset import SingleDataset
-from src.model import build_model, load_model_type, save_model_type
+from src.model import build_model, load_checkpoint, load_model_type, save_model_type
 
 
 class SimpleImageProcessor:
@@ -128,6 +128,7 @@ def train(args):
 
     model, model_constants = build_model(args.model_type, pretrained=args.pretrained)
     model = model.to(device=device, dtype=torch.float32)
+    optimizer_state = None
     if args.checkpoint_path is not None:
         if os.path.isdir(args.checkpoint_path):
             checkpoint_model_type = load_model_type(args.checkpoint_path, default=args.model_type)
@@ -142,7 +143,8 @@ def train(args):
         if args.pretrained is not None:
             print(f"NOTE: --checkpoint-path resume overwrites the --pretrained {args.pretrained} transfer"
                   " unless this checkpoint itself came from a --pretrained run.")
-        model.load_state_dict(torch.load(weights_path, map_location=device))
+        model_state, optimizer_state = load_checkpoint(weights_path, map_location=device)
+        model.load_state_dict(model_state)
         print(f"Loaded model from {weights_path}")
     model.train()
 
@@ -154,6 +156,13 @@ def train(args):
     ])
     print(f"  Head LR: {args.lr:.1e} (wd {args.head_weight_decay})  "
           f"Backbone LR: {args.lr * args.backbone_lr_scale:.1e} (scale {args.backbone_lr_scale}, wd {args.weight_decay})")
+
+    if optimizer_state is not None:
+        optimizer.load_state_dict(optimizer_state)
+        print("  Loaded optimizer state (Adam moments) from checkpoint")
+    elif args.checkpoint_path is not None:
+        print("  WARNING: checkpoint has no saved optimizer state — Adam moments start cold, "
+              "expect a transient loss spike over the first several post-resume steps")
 
     backbone_frozen = args.freeze_backbone_steps > 0
     if backbone_frozen:
@@ -177,7 +186,7 @@ def train(args):
             return
         os.makedirs(args.save_path, exist_ok=True)
         weights_path = os.path.join(args.save_path, "weights.pt")
-        torch.save(model.state_dict(), weights_path)
+        torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict()}, weights_path)
         save_model_type(args.save_path, args.model_type)
         for src, dst_name in (
             ("src/constants.py", "constants.py"),

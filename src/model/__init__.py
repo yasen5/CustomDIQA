@@ -1,5 +1,7 @@
 import os
 
+import torch
+
 from .vit.model import EncoderModel
 from .vit import constants as vit_constants
 from .cnn.model import EfficientNet
@@ -40,3 +42,9 @@ def load_model_type(checkpoint_dir: str, default: str = "vit") -> str:
         return default
     with open(marker_path) as f:
         return f.read().strip()
+
+
+def load_checkpoint(weights_path: str, map_location=None):
+    """Load a weights.pt file, returning (model_state_dict, optimizer_state_dict)."""
+    raw = torch.load(weights_path, map_location=map_location)
+    return raw["model"], raw.get("optimizer")

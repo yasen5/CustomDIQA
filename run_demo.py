@@ -23,7 +23,7 @@ from src.constants import (
     TRAIN_SAMPLE_SEED_DEFAULT,
 )
 from src.datasets.gen_soft_label import load_soft_label_samples
-from src.model import build_model, load_model_type
+from src.model import build_model, load_checkpoint, load_model_type
 from src.trainer import SimpleImageProcessor, get_device
 from src.utils import expand2square
 
@@ -95,7 +95,8 @@ def demo(args):
 
     model, model_constants = build_model(model_type)
     model = model.to(device=device, dtype=torch.float32)
-    model.load_state_dict(torch.load(weights_path, map_location="cpu"))
+    model_state, _ = load_checkpoint(weights_path, map_location="cpu")
+    model.load_state_dict(model_state)
     model.eval()
     print(f"Loaded {model_type} model from {weights_path}")
 
