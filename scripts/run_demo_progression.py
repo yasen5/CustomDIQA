@@ -8,7 +8,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-import torch
 from PIL import Image
 
 sys.path.insert(0, ".")
@@ -20,9 +19,8 @@ from src.constants import (
     resolve_dataset_paths,
 )
 from src.datasets.gen_soft_label import load_soft_label_samples
-from src.model import build_model, load_checkpoint, load_model_type
-from src.trainer import SimpleImageProcessor, get_device
-from run_demo import run_model
+from src.trainer import get_device
+import script_utils
 
 # KADID images are named "I<ref>_<distortion>_<level>.png"; a "progression" is every
 # level (severity 01, 02, 03, ...) of one <ref>_<distortion> pair, e.g. I48_05_01..05.
@@ -56,23 +54,7 @@ def demo(args):
     device = get_device()
     print(f"Device: {device}")
 
-    if os.path.isdir(args.model_path):
-        model_type = args.model_type or load_model_type(args.model_path)
-        weights_path = os.path.join(args.model_path, "weights.pt")
-    else:
-        if args.model_type is None:
-            raise ValueError("--model-type is required when --model-path is a weights file, not a checkpoint dir")
-        model_type = args.model_type
-        weights_path = args.model_path
-
-    model, model_constants = build_model(model_type)
-    model = model.to(device=device, dtype=torch.float32)
-    model_state, _ = load_checkpoint(weights_path, map_location="cpu")
-    model.load_state_dict(model_state)
-    model.eval()
-    print(f"Loaded {model_type} model from {weights_path}")
-
-    processor = SimpleImageProcessor(model_constants.img_size)
+    iqa_model = script_utils.load_model(args, device)
 
     tagged_samples = load_tagged_samples(args.data_root)
     groups = group_progressions(tagged_samples)
@@ -93,7 +75,7 @@ def demo(args):
         samples = [s for s, _ in group]
         splits = [split for _, split in group]
         images = [Image.open(os.path.join(args.data_root, s.image)).convert("RGB") for s in samples]
-        _, pred_scores = run_model(model, processor, images, device)
+        _, pred_scores = iqa_model.predict(images)
         gt_scores = [s.gt_score_norm for s in samples]
         levels = list(range(1, len(group) + 1))
 
@@ -123,9 +105,7 @@ def demo(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-path", required=True)
-    parser.add_argument("--model-type", choices=["vit", "cnn"], default=None,
-                        help="Overrides the checkpoint's recorded model type; required if --model-path is a weights file")
+    script_utils.add_model_args(parser)
     parser.add_argument("--data-root", default=DATA_DEQA_SCORE_DIR_DEFAULT,
                          help="Path to the Data-DeQA-Score directory (doubles as the image root)")
     parser.add_argument("--num-sets", type=int, default=3, help="Number of distortion progressions to show")

@@ -8,8 +8,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy as np
-import torch
-import torch.nn.functional as F
 from PIL import Image
 
 sys.path.insert(0, ".")
@@ -25,24 +23,8 @@ from src.constants import (
     resolve_dataset_paths,
 )
 from src.datasets.gen_soft_label import load_soft_label_samples
-from src.model import build_model, load_checkpoint, load_model_type
-from src.trainer import SimpleImageProcessor, get_device
-from src.utils import expand2square
-
-SCORE_WEIGHTS = np.array([5, 4, 3, 2, 1], dtype=np.float32)
-
-
-@torch.inference_mode()
-def run_model(model, processor, pil_images, device):
-    tensors = []
-    for img in pil_images:
-        img = expand2square(img, tuple(int(x * 255) for x in processor.image_mean))
-        t = processor.preprocess(img, return_tensors="pt")["pixel_values"][0]
-        tensors.append(t)
-    batch = torch.stack(tensors).to(device=device, dtype=torch.float32)
-    probs = F.softmax(model(batch), dim=-1).cpu().numpy()
-    scores = (probs * SCORE_WEIGHTS).sum(axis=-1)
-    return probs, scores
+from src.trainer import get_device
+import script_utils
 
 
 def make_plot(titles, images, gt_scores, gt_probs_list, pred_probs, pred_scores, out_path, model_type):
@@ -61,9 +43,14 @@ def make_plot(titles, images, gt_scores, gt_probs_list, pred_probs, pred_scores,
         ax_img.set_title(titles[i], fontsize=9, pad=4)
 
         ax_dist = fig.add_subplot(gs[1, i])
-        ax_dist.fill_between(x, pred_probs[i], color=DEMO_PRED_COLOR, alpha=0.24)
-        ax_dist.plot(x, pred_probs[i], color=DEMO_PRED_COLOR, marker="o", linewidth=2.0,
-                     label=f"Pred ({pred_scores[i]:.2f})")
+        if pred_probs is not None:
+            ax_dist.fill_between(x, pred_probs[i], color=DEMO_PRED_COLOR, alpha=0.24)
+            ax_dist.plot(x, pred_probs[i], color=DEMO_PRED_COLOR, marker="o", linewidth=2.0,
+                         label=f"Pred ({pred_scores[i]:.2f})")
+        else:
+            # No 5-way distribution available (e.g. topiq_nr) — show just the scalar score.
+            ax_dist.plot([], [], color=DEMO_PRED_COLOR, marker="o", linewidth=2.0,
+                         label=f"Pred score: {pred_scores[i]:.2f} (no distribution)")
         ax_dist.fill_between(x, gt_p, color=DEMO_GT_COLOR, alpha=0.24)
         ax_dist.plot(x, gt_p, color=DEMO_GT_COLOR, marker="o", linewidth=2.0,
                      label=f"GT ({gt_scores[i]:.2f})")
@@ -77,7 +64,7 @@ def make_plot(titles, images, gt_scores, gt_probs_list, pred_probs, pred_scores,
         ax_dist.legend(fontsize=7.5, loc="upper right")
         ax_dist.set_title("Label Distributions", fontsize=9, pad=4)
 
-    fig.suptitle(f"{model_type.upper()} — Predicted vs Ground-Truth", fontsize=13, y=1.01)
+    fig.suptitle(f"{model_type.upper().replace('_', '-')} — Predicted vs Ground-Truth", fontsize=13, y=1.01)
     fig.savefig(out_path, bbox_inches="tight", dpi=150)
     print(f"Saved to {out_path}")
 
@@ -86,23 +73,7 @@ def demo(args):
     device = get_device()
     print(f"Device: {device}")
 
-    if os.path.isdir(args.model_path):
-        model_type = args.model_type or load_model_type(args.model_path)
-        weights_path = os.path.join(args.model_path, "weights.pt")
-    else:
-        if args.model_type is None:
-            raise ValueError("--model-type is required when --model-path is a weights file, not a checkpoint dir")
-        model_type = args.model_type
-        weights_path = args.model_path
-
-    model, model_constants = build_model(model_type)
-    model = model.to(device=device, dtype=torch.float32)
-    model_state, _ = load_checkpoint(weights_path, map_location="cpu")
-    model.load_state_dict(model_state)
-    model.eval()
-    print(f"Loaded {model_type} model from {weights_path}")
-
-    processor = SimpleImageProcessor(model_constants.img_size)
+    iqa_model = script_utils.load_model(args, device)
 
     # Pool samples across every selected dataset's --split. With --split train and
     # matching --sample-size/--sample-seed, this replicates the exact pool the trainer used.
@@ -137,21 +108,23 @@ def demo(args):
         print(f"WARNING: only found {len(titles)}/{args.num_samples} requested images "
               f"(some dataset images may not be downloaded locally)")
 
-    pred_probs, pred_scores = run_model(model, processor, images, device)
+    pred_probs, pred_scores = iqa_model.predict(images)
 
-    for title, gt_score, gt_p, score, probs in zip(titles, gt_scores, gt_probs_list, pred_scores, pred_probs):
-        dist = "  ".join(f"{l}={p:.2f}" for l, p in zip(DEMO_LEVELS, probs))
-        print(f"{title:<30}  pred={score:.2f}  gt={gt_score:.2f}  [{dist}]")
+    probs_iter = pred_probs if pred_probs is not None else [None] * len(titles)
+    for title, gt_score, score, probs in zip(titles, gt_scores, pred_scores, probs_iter):
+        if probs is not None:
+            dist = "  ".join(f"{l}={p:.2f}" for l, p in zip(DEMO_LEVELS, probs))
+            print(f"{title:<30}  pred={score:.2f}  gt={gt_score:.2f}  [{dist}]")
+        else:
+            print(f"{title:<30}  pred={score:.2f}  gt={gt_score:.2f}")
 
     if args.out:
-        make_plot(titles, images, gt_scores, gt_probs_list, pred_probs, pred_scores, args.out, model_type)
+        make_plot(titles, images, gt_scores, gt_probs_list, pred_probs, pred_scores, args.out, iqa_model.model_type)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-path", required=True)
-    parser.add_argument("--model-type", choices=["vit", "cnn"], default=None,
-                        help="Overrides the checkpoint's recorded model type; required if --model-path is a weights file")
+    script_utils.add_model_args(parser)
     for arg_spec in DATASET_SELECT_ARG_SPECS:
         parser.add_argument(*arg_spec["flags"], **arg_spec["kwargs"])
     parser.add_argument("--split", choices=["train", "test"], default="test",

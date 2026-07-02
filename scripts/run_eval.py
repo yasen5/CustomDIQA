@@ -8,7 +8,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 from PIL import Image
 
 sys.path.insert(0, ".")
@@ -23,12 +22,11 @@ from src.constants import (
     resolve_dataset_paths,
 )
 from src.datasets.gen_soft_label import calculate_srcc_plcc, load_soft_label_samples
-from src.model import build_model, load_checkpoint, load_model_type
-from src.trainer import SimpleImageProcessor, get_device
-from run_demo import run_model
+from src.trainer import get_device
+import script_utils
 
 
-def predict_dataset(model, processor, samples, image_folder, device, batch_size):
+def predict_dataset(iqa_model, samples, image_folder, batch_size):
     """Runs the model over `samples` in chunks of `batch_size`, skipping images
     that fail to load. Returns (pred_scores, gt_scores) over the samples actually
     used, both as float arrays aligned index-for-index."""
@@ -47,7 +45,7 @@ def predict_dataset(model, processor, samples, image_folder, device, batch_size)
             kept.append(s)
         if not images:
             continue
-        _, scores = run_model(model, processor, images, device)
+        _, scores = iqa_model.predict(images)
         preds.extend(scores.tolist())
         gts.extend(s.gt_score_norm for s in kept)
     if n_skipped:
@@ -117,23 +115,13 @@ def evaluate(args):
     device = get_device()
     print(f"Device: {device}")
 
-    if os.path.isdir(args.model_path):
-        model_type = args.model_type or load_model_type(args.model_path)
-        weights_path = os.path.join(args.model_path, "weights.pt")
-    else:
-        if args.model_type is None:
-            raise ValueError("--model-type is required when --model-path is a weights file, not a checkpoint dir")
-        model_type = args.model_type
-        weights_path = args.model_path
+    iqa_model = script_utils.load_model(args, device)
 
-    model, model_constants = build_model(model_type)
-    model = model.to(device=device, dtype=torch.float32)
-    model_state, _ = load_checkpoint(weights_path, map_location="cpu")
-    model.load_state_dict(model_state)
-    model.eval()
-    print(f"Loaded {model_type} model from {weights_path}")
-
-    processor = SimpleImageProcessor(model_constants.img_size)
+    if iqa_model.model_type == "topiq_nr":
+        print("NOTE: topiq_nr scores are linearly rescaled from pyiqa's documented ~0-1 range onto "
+              "this repo's 1-5 GT scale (an uncalibrated affine transform, not fit to this dataset's "
+              "actual MOS distribution) — MAE/RMSE below are roughly comparable to vit/cnn runs but "
+              "shouldn't be over-interpreted; SRCC/PLCC remain the most trustworthy comparison.")
 
     results = {}
     all_preds, all_gts = [], []
@@ -142,7 +130,7 @@ def evaluate(args):
         if args.max_samples is not None and len(samples) > args.max_samples:
             samples = random.Random(args.sample_seed).sample(samples, args.max_samples)
         print(f"\n[{key}] evaluating {len(samples)} samples from {path}")
-        preds, gts = predict_dataset(model, processor, samples, args.image_folder, device, args.batch_size)
+        preds, gts = predict_dataset(iqa_model, samples, args.image_folder, args.batch_size)
         metrics = compute_metrics(preds, gts)
         if metrics is None:
             print(f"  WARNING: fewer than 2 usable samples for {key!r}, skipping")
@@ -160,20 +148,18 @@ def evaluate(args):
     print_table(results, pooled)
 
     if args.out:
-        make_plot(results, args.out, model_type)
+        make_plot(results, args.out, iqa_model.model_type)
 
     if args.out_json:
         with open(args.out_json, "w") as f:
-            json.dump({"model_path": args.model_path, "model_type": model_type,
+            json.dump({"model_path": args.model_path, "model_type": iqa_model.model_type,
                        "split": args.split, "per_dataset": results, "pooled": pooled}, f, indent=2)
         print(f"Results saved to {args.out_json}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate a checkpoint's SRCC/PLCC/MAE/RMSE per dataset")
-    parser.add_argument("--model-path", required=True)
-    parser.add_argument("--model-type", choices=["vit", "cnn"], default=None,
-                        help="Overrides the checkpoint's recorded model type; required if --model-path is a weights file")
+    script_utils.add_model_args(parser)
     for arg_spec in DATASET_SELECT_ARG_SPECS:
         parser.add_argument(*arg_spec["flags"], **arg_spec["kwargs"])
     parser.add_argument("--split", choices=["train", "test"], default=EVAL_SPLIT_DEFAULT,

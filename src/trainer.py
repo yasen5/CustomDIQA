@@ -159,6 +159,12 @@ def train(args):
 
     if optimizer_state is not None:
         optimizer.load_state_dict(optimizer_state)
+        # load_state_dict restores the checkpoint's own param_group lrs (Adam moments
+        # come along with them) — reassert this invocation's --lr/--backbone-lr-scale,
+        # otherwise a resume silently ignores any new --lr and keeps training at the
+        # old rate (OscillationAwareLR then captures those stale values as its base_lrs).
+        for pg, lr in zip(optimizer.param_groups, (args.lr, args.lr * args.backbone_lr_scale)):
+            pg["lr"] = lr
         print("  Loaded optimizer state (Adam moments) from checkpoint")
     elif args.checkpoint_path is not None:
         print("  WARNING: checkpoint has no saved optimizer state — Adam moments start cold, "

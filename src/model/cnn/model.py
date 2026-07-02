@@ -44,6 +44,8 @@ class EfficientNet(nn.Module):
         self.pool = nn.AdaptiveAvgPool2d(1)
         self.head = head.MeanOpinionScoreHead()
 
+        self.apply(self._init_weights)
+
     def forward(self, rgb_image: torch.FloatTensor) -> torch.Tensor:
         out = self.stem(rgb_image) # (batch_size, stem_channels, img_size / 2, img_size / 2)
         out = self.blocks(out) # (batch_size, last_stage_channels, img_size / 32, img_size / 32)
