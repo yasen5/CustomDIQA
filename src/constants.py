@@ -9,6 +9,17 @@ DEMO_LEVELS = ["Excellent", "Good", "Fair", "Poor", "Bad"]
 DEMO_PRED_COLOR = "steelblue"
 DEMO_GT_COLOR = "coral"
 
+# Canonical KADID-10k 25 synthetic distortion types, in original-paper order.
+# Index with KADID_DISTORTION_NAMES[distortion_type - 1] (distortion_type is 1-25, from filenames).
+KADID_DISTORTION_NAMES = [
+    "Gaussian blur", "Lens blur", "Motion blur", "Color diffusion", "Color shift",
+    "Color quantization", "Color saturation 1", "Color saturation 2", "JPEG2000 compression",
+    "JPEG compression", "White noise", "White noise in color component", "Impulse noise",
+    "Multiplicative noise", "Denoise", "Brighten", "Darken", "Mean shift", "Jitter",
+    "Non-eccentricity patch", "Pixelate", "Quantization", "Color block", "High sharpen",
+    "Contrast change",
+]
+
 EVAL_BATCH_SIZE_DEFAULT = 16
 EVAL_SPLIT_DEFAULT = "test"
 EVAL_OUT_DEFAULT = "eval_cross_dataset.png"
