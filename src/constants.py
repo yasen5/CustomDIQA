@@ -9,6 +9,12 @@ DEMO_LEVELS = ["Excellent", "Good", "Fair", "Poor", "Bad"]
 DEMO_PRED_COLOR = "steelblue"
 DEMO_GT_COLOR = "coral"
 
+EVAL_BATCH_SIZE_DEFAULT = 16
+EVAL_SPLIT_DEFAULT = "test"
+EVAL_OUT_DEFAULT = "eval_cross_dataset.png"
+EVAL_SRCC_COLOR = "steelblue"
+EVAL_PLCC_COLOR = "coral"
+
 TRAIN_SAMPLE_SEED_DEFAULT = 42
 
 TRAIN_STEPS_DEFAULT = 500
