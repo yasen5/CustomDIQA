@@ -32,8 +32,13 @@ from src.trainer import train
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-path", required=True)
-    parser.add_argument("--image-folder", required=True)
+    parser.add_argument("--data-path", required=True, nargs="+",
+                        help="One or more dataset meta json paths, trained on jointly")
+    parser.add_argument("--data-weights", type=int, nargs="+", default=None,
+                        help="Integer replication weight per --data-path entry (default: 1 each)")
+    parser.add_argument("--image-folder", required=True,
+                        help="Shared image root; each meta json's 'image' field already includes "
+                             "its dataset-specific subdirectory")
     parser.add_argument("--model-type", choices=MODEL_TYPES, default=TRAIN_MODEL_TYPE_DEFAULT,
                         help="Backbone architecture to train")
     parser.add_argument("--checkpoint-dir", default="checkpoints")
@@ -79,6 +84,13 @@ if __name__ == "__main__":
                         help="Seed for subset selection and mini-batch sampling")
     args = parser.parse_args()
 
+    if args.data_weights is None:
+        args.data_weights = [1] * len(args.data_path)
+    elif len(args.data_weights) != len(args.data_path):
+        raise ValueError(
+            f"--data-weights has {len(args.data_weights)} entries, expected one per "
+            f"--data-path ({len(args.data_path)})"
+        )
     if args.warmup_steps is None:
         args.warmup_steps = TRAIN_VIT_WARMUP_STEPS_DEFAULT if args.model_type == "vit" else TRAIN_WARMUP_STEPS_DEFAULT
     if args.freeze_backbone_steps is None:

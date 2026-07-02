@@ -1,5 +1,5 @@
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 import json
 import numpy as np
 import os
@@ -36,7 +36,8 @@ class SoftLabelSample:
 
     @classmethod
     def from_json_dict(cls, data: Dict[str, Any]) -> "SoftLabelSample":
-        return cls(**data)
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
 
 
 def load_soft_label_samples(path: str) -> List[SoftLabelSample]:
@@ -93,6 +94,37 @@ def get_binary_probs(mos, min_mos=1.0, max_mos=5.0):
     assert round(np.array(probs).sum(), 5) == 1
     probs = probs[::-1]  # should start with "excellent" & end with "bad"
     return probs
+
+
+def generate_soft_labels(key, data_root, force=False):
+    """(Re)build metas/train.json + metas/test.json for a dataset from its raw
+    metas/mos.json + metas/split.json, if both are present and the dataset has
+    known density-fit params. Returns False (no-op) if either precondition isn't met."""
+    from src.constants import IQA_DATASET_ARCHIVES, SOFT_LABEL_DATASET_PARAMS
+
+    params = SOFT_LABEL_DATASET_PARAMS.get(key)
+    if params is None:
+        return False
+    _, dataset_dir = IQA_DATASET_ARCHIVES[key]
+    metas_dir = os.path.join(data_root, dataset_dir, "metas")
+    mos_json = os.path.join(metas_dir, "mos.json")
+    split_json = os.path.join(metas_dir, "split.json")
+    if not (os.path.isfile(mos_json) and os.path.isfile(split_json)):
+        return False
+    save_train = os.path.join(metas_dir, "train.json")
+    save_test = os.path.join(metas_dir, "test.json")
+    if not force and os.path.isfile(save_train) and os.path.isfile(save_test):
+        return False
+
+    main({
+        "mos_json": mos_json,
+        "split_json": split_json,
+        "save_train": save_train,
+        "save_test": save_test,
+        "img_dir": f"{dataset_dir}/images",
+        **params,
+    })
+    return True
 
 
 def main(cfg):

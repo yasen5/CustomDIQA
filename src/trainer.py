@@ -205,8 +205,8 @@ def train(args):
 
     processor = SimpleImageProcessor(model_constants.img_size, augment=args.augment)
     data_args = types.SimpleNamespace(
-        data_paths=[args.data_path],
-        data_weights=[1],
+        data_paths=args.data_path,
+        data_weights=args.data_weights,
         image_folder=args.image_folder,
         image_processor=processor,
         image_aspect_ratio="pad",
@@ -224,10 +224,11 @@ def train(args):
             )
         rng = random.Random(args.sample_seed)
         pool_indices = rng.sample(range(len(dataset)), args.sample_size)
-        print(f"\nDataset: {args.sample_size} samples (subset of {len(dataset)}) from {args.data_path}")
+        print(f"\nDataset: {args.sample_size} samples (subset of {len(dataset)}) from {args.data_path}"
+              f" (weights {args.data_weights})")
     else:
         pool_indices = list(range(len(dataset)))
-        print(f"\nDataset: {len(pool_indices)} samples from {args.data_path}")
+        print(f"\nDataset: {len(pool_indices)} samples from {args.data_path} (weights {args.data_weights})")
 
     if len(pool_indices) < args.batch_size:
         raise ValueError(f"Dataset too small: {len(pool_indices)} < batch_size {args.batch_size}")
