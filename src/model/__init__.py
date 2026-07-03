@@ -6,10 +6,13 @@ from .vit.model import EncoderModel
 from .vit import constants as vit_constants
 from .cnn.model import EfficientNet
 from .cnn import constants as cnn_constants
+from .hybrid.model import HybridModel
+from .hybrid import constants as hybrid_constants
 
 MODEL_REGISTRY = {
     "vit": (EncoderModel, vit_constants),
     "cnn": (EfficientNet, cnn_constants),
+    "hybrid": (HybridModel, hybrid_constants),
 }
 
 MODEL_TYPE_FILENAME = "model_type.txt"
@@ -30,6 +33,11 @@ def build_model(model_type: str, pretrained: str | None = None):
             raise ValueError("--pretrained imagenet is only supported for --model-type cnn")
         from .cnn.pretrained import load_imagenet_efficientnet_b0
         load_imagenet_efficientnet_b0(model)
+    elif pretrained == "topiq_nr":
+        if model_type != "hybrid":
+            raise ValueError("--pretrained topiq_nr is only supported for --model-type hybrid")
+        from .hybrid.pretrained import load_topiq_nr_pretrained
+        load_topiq_nr_pretrained(model)
     elif pretrained is not None:
         raise ValueError(f"Unknown pretrained option {pretrained!r}")
     return model, constants

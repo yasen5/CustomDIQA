@@ -10,7 +10,7 @@ from src.model import build_model, load_checkpoint, load_model_type
 from src.trainer import SimpleImageProcessor
 from src.utils import expand2square
 
-MODEL_CHOICES = ("vit", "cnn", "topiq_nr")
+MODEL_CHOICES = ("vit", "cnn", "hybrid", "topiq_nr")
 SCORE_WEIGHTS = np.array([5, 4, 3, 2, 1], dtype=np.float32)
 
 TOPIQ_NR_SCORE_RANGE = (0.0, 1.0)  # pyiqa's documented (approximate) score_range for topiq_nr: "~0, ~1"
@@ -40,12 +40,12 @@ def _rescale(x, src_range, dst_range):
 
 def add_model_args(parser):
     parser.add_argument("--model-path", default=None,
-                         help="Checkpoint dir or weights file. Required for --model-type vit/cnn "
+                         help="Checkpoint dir or weights file. Required for --model-type vit/cnn/hybrid "
                               "(unless --model-type is omitted and can be read from the checkpoint "
                               "dir's model_type.txt); ignored for topiq_nr, which uses pyiqa's own "
                               "pretrained weights.")
     parser.add_argument("--model-type", choices=MODEL_CHOICES, default=None,
-                         help="'vit'/'cnn' load a trained checkpoint from --model-path (overrides "
+                         help="'vit'/'cnn'/'hybrid' load a trained checkpoint from --model-path (overrides "
                               "the checkpoint's recorded type; required if --model-path is a weights "
                               "file rather than a checkpoint dir). 'topiq_nr' uses pyiqa's pretrained "
                               "TOPIQ-NR no-reference IQA metric instead of a local checkpoint.")

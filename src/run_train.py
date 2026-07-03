@@ -49,7 +49,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=TRAIN_LR_DEFAULT)
     parser.add_argument("--warmup-steps", type=int, default=None,
                         help=f"Defaults to {TRAIN_VIT_WARMUP_STEPS_DEFAULT} for vit, "
-                             f"{TRAIN_WARMUP_STEPS_DEFAULT} for cnn, unless set explicitly")
+                             f"{TRAIN_WARMUP_STEPS_DEFAULT} for cnn/hybrid, unless set explicitly")
     parser.add_argument("--log-every", type=int, default=TRAIN_LOG_EVERY_DEFAULT)
     parser.add_argument("--osc-factor", type=float, default=TRAIN_OSC_FACTOR_DEFAULT)
     parser.add_argument("--osc-threshold", type=float, default=TRAIN_OSC_THRESHOLD_DEFAULT)
@@ -73,8 +73,9 @@ if __name__ == "__main__":
                         help="LR re-warmup steps for the backbone group after it unfreezes")
     parser.add_argument("--pretrained", choices=PRETRAINED_TYPES, default=TRAIN_PRETRAINED_DEFAULT,
                         help="Initialize the backbone from an external pretrained model: "
-                             "'dinov2' (vit only, first N transformer blocks + patch-embed) or "
-                             "'imagenet' (cnn only, full EfficientNet-B0 backbone transfer). "
+                             "'dinov2' (vit only, first N transformer blocks + patch-embed), "
+                             "'imagenet' (cnn only, full EfficientNet-B0 backbone transfer), or "
+                             "'topiq_nr' (hybrid only, full TOPIQ-NR CFANet backbone transfer). "
                              "One-time network fetch on first use, cached afterward.")
     parser.add_argument("--augment", action="store_true",
                         help="Apply mild random-crop + horizontal-flip augmentation (recommended for vit)")
