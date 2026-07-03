@@ -107,6 +107,8 @@ class TopiqNRModel:
             raise RuntimeError(
                 "--model-type topiq_nr requires the 'pyiqa' package. Install it with `pip install pyiqa`."
             )
+        from src.model.pyiqa_loader import configure_pyiqa_cache
+        configure_pyiqa_cache()
         self.model_type = "topiq_nr"
         self.device = device
         self.metric = pyiqa.create_metric("topiq_nr", device=device)
