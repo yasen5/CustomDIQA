@@ -22,6 +22,7 @@ class SimpleImageProcessor:
     image_std = [0.229, 0.224, 0.225]
 
     def __init__(self, img_size, augment=False):
+        self.augment = augment
         self.crop_size = {"height": img_size, "width": img_size}
         steps = []
         if augment:

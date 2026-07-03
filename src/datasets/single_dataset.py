@@ -9,6 +9,7 @@ from torch.utils.data import Dataset
 
 from src.utils import expand2square, rank0_print
 from .gen_soft_label import load_soft_label_samples
+from .preprocessed import load_preprocessed_cache, preprocessed_cache_path
 
 
 @dataclass
@@ -23,6 +24,7 @@ class SingleDataset(Dataset):
     def __init__(self, data_paths, data_weights, data_args):
         super().__init__()
         list_data_dict = []
+        preprocessed_images = []
         for data_path, data_weight in zip(data_paths, data_weights):
             data_dict = load_soft_label_samples(data_path)
             n_before = len(data_dict)
@@ -31,10 +33,32 @@ class SingleDataset(Dataset):
             if n_skipped:
                 rank0_print(f"WARNING: skipped {n_skipped}/{n_before} samples missing 'level_probs' in {data_path}")
             list_data_dict += data_dict * data_weight
+            cache_images = self._load_preprocessed(data_path, data_dict, data_args)
+            for _ in range(data_weight):
+                if cache_images is None:
+                    preprocessed_images.extend([None] * len(data_dict))
+                else:
+                    preprocessed_images.extend(cache_images)
 
         rank0_print("Formatting inputs...Skip in lazy mode")
         self.list_data_dict = list_data_dict
         self.data_args = data_args
+        self.preprocessed_images = preprocessed_images
+
+    @staticmethod
+    def _load_preprocessed(data_path, data_dict, data_args):
+        processor = data_args.image_processor
+        if getattr(processor, "augment", False):
+            return None
+        cache_path = preprocessed_cache_path(data_path, processor, data_args.image_aspect_ratio)
+        try:
+            images = load_preprocessed_cache(cache_path, data_dict, processor, data_args.image_aspect_ratio)
+        except Exception as ex:
+            rank0_print(f"WARNING: could not load preprocessed cache {cache_path}: {ex}")
+            return None
+        if images is not None:
+            rank0_print(f"Using preprocessed cache: {cache_path}")
+        return images
 
     def __len__(self):
         return len(self.list_data_dict)
@@ -45,6 +69,14 @@ class SingleDataset(Dataset):
     def __getitem__(self, i) -> SingleSampleItem:
         while True:
             try:
+                cached_image = self.preprocessed_images[i]
+                if cached_image is not None:
+                    sample = self.list_data_dict[i]
+                    return SingleSampleItem(
+                        image=cached_image,
+                        level_probs=sample.level_probs,
+                    )
+
                 sample = self.list_data_dict[i]
                 image_folder = self.data_args.image_folder
                 processor = self.data_args.image_processor
