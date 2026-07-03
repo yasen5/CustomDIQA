@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
+from PIL import Image
 
 from src.model import build_model, load_checkpoint, load_model_type
 from src.trainer import SimpleImageProcessor
@@ -14,6 +15,21 @@ SCORE_WEIGHTS = np.array([5, 4, 3, 2, 1], dtype=np.float32)
 
 TOPIQ_NR_SCORE_RANGE = (0.0, 1.0)  # pyiqa's documented (approximate) score_range for topiq_nr: "~0, ~1"
 GT_SCORE_RANGE = (1.0, 5.0)        # this repo's MOS scale (see gen_soft_label.py mos_norm, SCORE_WEIGHTS above)
+
+# topiq_nr's CFANet has no built-in resize for this checkpoint (test_img_size=None in pyiqa's
+# config), so its cross-attention token count grows with input pixel count. Raw phone photos
+# (e.g. SPAQ, ~3000-5500px) OOM an 11GB GPU; this cap only kicks in above that size, so every
+# other dataset here (already downscaled) still scores at true native resolution.
+TOPIQ_NR_MAX_SIDE = 2048
+
+
+def _cap_image_size(img, max_side):
+    w, h = img.size
+    longest = max(w, h)
+    if longest <= max_side:
+        return img
+    scale = max_side / longest
+    return img.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.Resampling.BICUBIC)
 
 
 def _rescale(x, src_range, dst_range):
@@ -100,8 +116,10 @@ class TopiqNRModel:
     def predict(self, pil_images):
         # Native-resolution, one image at a time: topiq_nr's distortion-sensitive scoring
         # depends on not resizing/cropping, and images vary in size so can't be batched.
+        # Images above TOPIQ_NR_MAX_SIDE are downscaled to avoid OOM (see comment there).
         scores = []
         for img in pil_images:
+            img = _cap_image_size(img, TOPIQ_NR_MAX_SIDE)
             tensor = TF.to_tensor(img).unsqueeze(0).to(self.device)
             scores.append(self.metric(tensor).item())
         scores = _rescale(np.array(scores, dtype=np.float32), TOPIQ_NR_SCORE_RANGE, GT_SCORE_RANGE)

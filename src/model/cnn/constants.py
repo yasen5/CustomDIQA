@@ -7,7 +7,7 @@ batch_norm_epsilon = 0.001
 se_ratio = 0.25
 depth_divisor = 8
 abs_value_head_scaledown = 4
-img_size = 224
+img_size = 448
 
 stem_channels = 32
 head_channels = 1280
