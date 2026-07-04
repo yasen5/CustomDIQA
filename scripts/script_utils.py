@@ -1,4 +1,5 @@
 import os
+import types
 
 import numpy as np
 import torch
@@ -6,12 +7,17 @@ import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from PIL import Image
 
+from src.datasets.single_dataset import SingleDataset
 from src.model import build_model, load_checkpoint, load_model_type
 from src.trainer import SimpleImageProcessor
 from src.utils import expand2square
 
 MODEL_CHOICES = ("vit", "cnn", "hybrid", "topiq_nr")
 SCORE_WEIGHTS = np.array([5, 4, 3, 2, 1], dtype=np.float32)
+
+# Matches CustomModel.predict()'s hardcoded expand2square call and scripts/preprocess_datasets.py's
+# default --image-aspect-ratio, since that's the only aspect-ratio handling any of these scripts apply.
+IMAGE_ASPECT_RATIO = "pad"
 
 TOPIQ_NR_SCORE_RANGE = (0.0, 1.0)  # pyiqa's documented (approximate) score_range for topiq_nr: "~0, ~1"
 GT_SCORE_RANGE = (1.0, 5.0)        # this repo's MOS scale (see gen_soft_label.py mos_norm, SCORE_WEIGHTS above)
@@ -60,6 +66,62 @@ def load_model(args, device):
     return CustomModel(args, device)
 
 
+def build_dataset(meta_path, image_folder, processor):
+    """Wraps a single meta file in a SingleDataset (see src/datasets/single_dataset.py) so every
+    script that scores a fixed-size-processor model (vit/cnn/hybrid, via CustomModel) gets the
+    exact same image loading behavior training does — preprocessed-tensor cache lookup
+    (src/datasets/preprocessed.py) when available, PIL decode/resize/pad otherwise, and the same
+    level_probs-based sample filtering — instead of every script reimplementing it. Not usable
+    for topiq_nr: it scores at native resolution, incompatible with SingleDataset's fixed
+    crop_size pipeline (see predict_raw_items below)."""
+    data_args = types.SimpleNamespace(
+        image_folder=image_folder,
+        image_processor=processor,
+        image_aspect_ratio=IMAGE_ASPECT_RATIO,
+    )
+    return SingleDataset(data_paths=[meta_path], data_weights=[1], data_args=data_args)
+
+
+def predict_dataset_items(iqa_model, dataset, indices, batch_size):
+    """Runs `iqa_model` (a CustomModel) over `indices` into `dataset` (from build_dataset) in
+    chunks of `batch_size`, yielding (index_chunk, scores) per batch. Callers zip index_chunk
+    against dataset.list_data_dict (or whatever they tagged those indices with, e.g. a pooled
+    multi-dataset key) to pull gt scores/metadata — this function only knows about batching and
+    prediction, not what a caller wants to do with the result."""
+    for i in range(0, len(indices), batch_size):
+        chunk = indices[i:i + batch_size]
+        batch = torch.stack([dataset[j].image for j in chunk])
+        _, scores = iqa_model.predict_tensors(batch)
+        yield chunk, scores.tolist()
+
+
+def predict_raw_items(iqa_model, items, image_folder, get_image_path, batch_size):
+    """Fallback sampling path for models without a fixed-size processor (currently only
+    topiq_nr — see build_dataset). Loads each item's image with PIL and calls iqa_model.predict
+    directly, dropping (with a warning) any item whose image fails to load. `items` can be any
+    objects; `get_image_path(item)` extracts the image's path relative to `image_folder`. Yields
+    (kept_items, scores) per batch."""
+    n_total, n_skipped = len(items), 0
+    for i in range(0, len(items), batch_size):
+        chunk = items[i:i + batch_size]
+        images, kept = [], []
+        for item in chunk:
+            image_path = get_image_path(item)
+            try:
+                images.append(Image.open(os.path.join(image_folder, image_path)).convert("RGB"))
+            except (FileNotFoundError, OSError) as ex:
+                print(f"WARNING: skipping {image_path}: {ex}")
+                n_skipped += 1
+                continue
+            kept.append(item)
+        if not images:
+            continue
+        _, scores = iqa_model.predict(images)
+        yield kept, scores.tolist()
+    if n_skipped:
+        print(f"  ({n_skipped}/{n_total} images skipped — not found locally)")
+
+
 class CustomModel:
     def __init__(self, args, device):
         if args.model_path is None:
@@ -93,7 +155,13 @@ class CustomModel:
             img = expand2square(img, tuple(int(x * 255) for x in self.processor.image_mean))
             t = self.processor.preprocess(img, return_tensors="pt")["pixel_values"][0]
             tensors.append(t)
-        batch = torch.stack(tensors).to(device=self.device, dtype=torch.float32)
+        return self.predict_tensors(torch.stack(tensors))
+
+    @torch.inference_mode()
+    def predict_tensors(self, batch):
+        """Same as predict(), but skips PIL decode/resize for already-preprocessed tensors
+        (e.g. from a preprocessed_cache_path() cache built by scripts/preprocess_datasets.py)."""
+        batch = batch.to(device=self.device, dtype=torch.float32)
         probs = F.softmax(self.model(batch), dim=-1).cpu().numpy()
         scores = (probs * SCORE_WEIGHTS).sum(axis=-1)
         return probs, scores

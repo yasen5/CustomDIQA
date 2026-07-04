@@ -8,7 +8,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image
 
 sys.path.insert(0, ".")
 from src.constants import (
@@ -26,30 +25,36 @@ from src.trainer import get_device
 import script_utils
 
 
-def predict_dataset(iqa_model, samples, image_folder, batch_size):
-    """Runs the model over `samples` in chunks of `batch_size`, skipping images
-    that fail to load. Returns (pred_scores, gt_scores) over the samples actually
-    used, both as float arrays aligned index-for-index."""
+def predict_dataset(iqa_model, key, path, image_folder, batch_size, max_samples, sample_seed):
+    """Returns (pred_scores, gt_scores) over dataset `key`'s samples at `path`, both as float
+    arrays aligned index-for-index. All image loading/sampling is delegated to
+    script_utils.build_dataset (SingleDataset — cache-aware) for fixed-size-processor models, or
+    script_utils.predict_raw_items (raw PIL, native resolution) for topiq_nr — see script_utils.py
+    for why those two paths can't be unified further."""
+    if iqa_model.model_type == "topiq_nr":
+        samples = load_soft_label_samples(path)
+        if max_samples is not None and len(samples) > max_samples:
+            samples = random.Random(sample_seed).sample(samples, max_samples)
+        print(f"\n[{key}] evaluating {len(samples)} samples from {path}")
+        preds, gts = [], []
+        for kept, scores in script_utils.predict_raw_items(
+                iqa_model, samples, image_folder, lambda s: s.image, batch_size):
+            preds.extend(scores)
+            gts.extend(s.gt_score_norm for s in kept)
+        return np.array(preds, dtype=np.float64), np.array(gts, dtype=np.float64)
+
+    dataset = script_utils.build_dataset(path, image_folder, iqa_model.processor)
+    indices = list(range(len(dataset)))
+    if max_samples is not None and len(indices) > max_samples:
+        indices = random.Random(sample_seed).sample(indices, max_samples)
+    n_cached = sum(1 for j in indices if dataset.preprocessed_images[j] is not None)
+    cache_note = f" ({n_cached}/{len(indices)} from preprocessed cache)" if n_cached else ""
+    print(f"\n[{key}] evaluating {len(indices)} samples from {path}{cache_note}")
+
     preds, gts = [], []
-    n_skipped = 0
-    for i in range(0, len(samples), batch_size):
-        chunk = samples[i:i + batch_size]
-        images, kept = [], []
-        for s in chunk:
-            try:
-                images.append(Image.open(os.path.join(image_folder, s.image)).convert("RGB"))
-            except (FileNotFoundError, OSError) as ex:
-                print(f"WARNING: skipping {s.image}: {ex}")
-                n_skipped += 1
-                continue
-            kept.append(s)
-        if not images:
-            continue
-        _, scores = iqa_model.predict(images)
-        preds.extend(scores.tolist())
-        gts.extend(s.gt_score_norm for s in kept)
-    if n_skipped:
-        print(f"  ({n_skipped}/{len(samples)} images skipped — not found locally)")
+    for chunk, scores in script_utils.predict_dataset_items(iqa_model, dataset, indices, batch_size):
+        preds.extend(scores)
+        gts.extend(dataset.list_data_dict[j].gt_score_norm for j in chunk)
     return np.array(preds, dtype=np.float64), np.array(gts, dtype=np.float64)
 
 
@@ -126,11 +131,8 @@ def evaluate(args):
     results = {}
     all_preds, all_gts = [], []
     for key, path in zip(args.dataset_keys, args.data_path):
-        samples = load_soft_label_samples(path)
-        if args.max_samples is not None and len(samples) > args.max_samples:
-            samples = random.Random(args.sample_seed).sample(samples, args.max_samples)
-        print(f"\n[{key}] evaluating {len(samples)} samples from {path}")
-        preds, gts = predict_dataset(iqa_model, samples, args.image_folder, args.batch_size)
+        preds, gts = predict_dataset(iqa_model, key, path, args.image_folder, args.batch_size,
+                                      args.max_samples, args.sample_seed)
         metrics = compute_metrics(preds, gts)
         if metrics is None:
             print(f"  WARNING: fewer than 2 usable samples for {key!r}, skipping")

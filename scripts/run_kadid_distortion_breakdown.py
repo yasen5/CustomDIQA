@@ -9,7 +9,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image
 
 sys.path.insert(0, ".")
 from src.constants import (
@@ -46,44 +45,60 @@ def parse_kadid_filename(image_path):
     return int(m.group(1)), int(m.group(2))
 
 
-def predict_kadid(iqa_model, samples, image_folder, batch_size):
-    """Runs the model over `samples` in chunks of `batch_size`, skipping images that
-    fail to load or whose filename doesn't match KADID's naming convention. Returns
-    one record per usable sample: {image, distortion_type, level, pred, gt, abs_error}."""
-    records = []
-    n_skipped, n_unparsed = 0, 0
-    for i in range(0, len(samples), batch_size):
-        chunk = samples[i:i + batch_size]
-        images, kept = [], []
-        for s in chunk:
-            parsed = parse_kadid_filename(s.image)
-            if parsed is None:
-                n_unparsed += 1
-                continue
-            try:
-                images.append(Image.open(os.path.join(image_folder, s.image)).convert("RGB"))
-            except (FileNotFoundError, OSError) as ex:
-                print(f"WARNING: skipping {s.image}: {ex}")
-                n_skipped += 1
-                continue
-            kept.append((s, parsed))
-        if not images:
-            continue
-        _, scores = iqa_model.predict(images)
-        for (s, (distortion_type, level)), pred in zip(kept, scores.tolist()):
-            abs_error = abs(pred - s.gt_score_norm)
-            records.append({
-                "image": s.image,
-                "distortion_type": distortion_type,
-                "level": level,
-                "pred": pred,
-                "gt": s.gt_score_norm,
-                "abs_error": abs_error,
-            })
-    if n_skipped:
-        print(f"  ({n_skipped}/{len(samples)} images skipped — not found locally)")
+def _make_record(sample, distortion_type, level, pred):
+    return {
+        "image": sample.image,
+        "distortion_type": distortion_type,
+        "level": level,
+        "pred": pred,
+        "gt": sample.gt_score_norm,
+        "abs_error": abs(pred - sample.gt_score_norm),
+    }
+
+
+def predict_kadid(iqa_model, path, image_folder, batch_size, max_samples, sample_seed):
+    """Returns one record per usable sample: {image, distortion_type, level, pred, gt,
+    abs_error}. Images whose filename doesn't match KADID's naming convention are dropped.
+    All other image loading/sampling is delegated to script_utils (SingleDataset-backed cache
+    for fixed-size-processor models, raw PIL for topiq_nr) — see script_utils.py."""
+    if iqa_model.model_type == "topiq_nr":
+        samples = load_soft_label_samples(path)
+        parsed_samples = [(s, parse_kadid_filename(s.image)) for s in samples]
+        n_unparsed = sum(1 for _, p in parsed_samples if p is None)
+        parsed_samples = [(s, p) for s, p in parsed_samples if p is not None]
+        if max_samples is not None and len(parsed_samples) > max_samples:
+            parsed_samples = random.Random(sample_seed).sample(parsed_samples, max_samples)
+        print(f"Evaluating {len(parsed_samples)} KADID samples from {path}")
+        if n_unparsed:
+            print(f"  ({n_unparsed} images skipped — filename didn't match KADID's naming convention)")
+
+        records = []
+        for kept, scores in script_utils.predict_raw_items(
+                iqa_model, parsed_samples, image_folder, lambda item: item[0].image, batch_size):
+            for (s, (distortion_type, level)), pred in zip(kept, scores):
+                records.append(_make_record(s, distortion_type, level, pred))
+        return records
+
+    dataset = script_utils.build_dataset(path, image_folder, iqa_model.processor)
+    parsed_by_index = {}
+    for j, s in enumerate(dataset.list_data_dict):
+        parsed = parse_kadid_filename(s.image)
+        if parsed is not None:
+            parsed_by_index[j] = parsed
+    n_unparsed = len(dataset) - len(parsed_by_index)
+
+    indices = list(parsed_by_index)
+    if max_samples is not None and len(indices) > max_samples:
+        indices = random.Random(sample_seed).sample(indices, max_samples)
+    print(f"Evaluating {len(indices)} KADID samples from {path}")
     if n_unparsed:
-        print(f"  ({n_unparsed}/{len(samples)} images skipped — filename didn't match KADID's naming convention)")
+        print(f"  ({n_unparsed} images skipped — filename didn't match KADID's naming convention)")
+
+    records = []
+    for chunk, scores in script_utils.predict_dataset_items(iqa_model, dataset, indices, batch_size):
+        for j, pred in zip(chunk, scores):
+            distortion_type, level = parsed_by_index[j]
+            records.append(_make_record(dataset.list_data_dict[j], distortion_type, level, pred))
     return records
 
 
@@ -187,12 +202,8 @@ def main(args):
     iqa_model = script_utils.load_model(args, device)
 
     _, data_paths = resolve_dataset_paths(["kadid"], [], args.data_root, args.split)
-    samples = load_soft_label_samples(data_paths[0])
-    if args.max_samples is not None and len(samples) > args.max_samples:
-        samples = random.Random(args.sample_seed).sample(samples, args.max_samples)
-    print(f"Evaluating {len(samples)} KADID samples from {data_paths[0]}")
-
-    records = predict_kadid(iqa_model, samples, args.data_root, args.batch_size)
+    records = predict_kadid(iqa_model, data_paths[0], args.data_root, args.batch_size,
+                             args.max_samples, args.sample_seed)
     if len(records) < 2:
         raise ValueError("Fewer than 2 usable KADID samples, cannot summarize")
 

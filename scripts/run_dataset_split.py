@@ -4,7 +4,7 @@ import os
 import random
 import sys
 
-from PIL import Image
+import torch
 
 sys.path.insert(0, ".")
 from src.constants import (
@@ -23,10 +23,20 @@ FAILURE_THRESHOLD_DEFAULT = 1.0
 SUCCESS_THRESHOLD_DEFAULT = 0.1
 
 
+def _bucket(record, failures, successes, failure_threshold, success_threshold, target_count):
+    if record["abs_error"] >= failure_threshold:
+        if target_count is None or len(failures) < target_count:
+            failures.append(record)
+    elif record["abs_error"] < success_threshold:
+        if target_count is None or len(successes) < target_count:
+            successes.append(record)
+
+
 def load_pooled_samples(dataset_keys, data_paths, max_samples, sample_seed):
-    """Loads samples from every dataset, tags each with its dataset key, caps each
-    dataset at `max_samples` (random subset) if given, and shuffles the pooled list
-    so a --target-count cutoff isn't biased toward whichever dataset comes first."""
+    """topiq_nr fallback pooling (see split_dataset_raw): loads samples from every dataset,
+    tags each with its dataset key, caps each dataset at `max_samples` (random subset) if given,
+    and shuffles the pooled list so a --target-count cutoff isn't biased toward whichever
+    dataset comes first."""
     pooled = []
     for key, path in zip(dataset_keys, data_paths):
         samples = load_soft_label_samples(path)
@@ -37,40 +47,54 @@ def load_pooled_samples(dataset_keys, data_paths, max_samples, sample_seed):
     return pooled
 
 
-def split_dataset(iqa_model, pooled, image_folder, batch_size, failure_threshold, success_threshold, target_count):
-    """Runs the model over `pooled` [(dataset_key, sample), ...] in chunks of `batch_size`,
-    bucketing each sample into failures (|pred - gt| >= failure_threshold) or successes
-    (|pred - gt| < success_threshold). Samples in between are discarded from both buckets.
-    Stops early once both buckets reach `target_count` (if given)."""
+def split_dataset_raw(iqa_model, pooled, image_folder, batch_size, failure_threshold, success_threshold, target_count):
+    """topiq_nr fallback: buckets `pooled` [(dataset_key, sample), ...] into failures/successes
+    via raw PIL loading (native resolution — see script_utils.predict_raw_items). Stops early
+    once both buckets reach `target_count` (if given)."""
     failures, successes = [], []
-    n_skipped = 0
+    for kept, scores in script_utils.predict_raw_items(
+            iqa_model, pooled, image_folder, lambda item: item[1].image, batch_size):
+        for (key, s), pred in zip(kept, scores):
+            diff = abs(pred - s.gt_score_norm)
+            record = {"dataset": key, "image": s.image, "pred": pred, "gt": s.gt_score_norm, "abs_error": diff}
+            _bucket(record, failures, successes, failure_threshold, success_threshold, target_count)
+        if target_count is not None and len(failures) >= target_count and len(successes) >= target_count:
+            break
+    return failures, successes
+
+
+def load_pooled_indices(datasets, max_samples, sample_seed):
+    """Pools (dataset_key, index) pairs across each dataset's SingleDataset (see
+    script_utils.build_dataset), capping each dataset at `max_samples` (random subset) if given,
+    and shuffling the pooled list so a --target-count cutoff isn't biased toward whichever
+    dataset comes first."""
+    pooled = []
+    for key, dataset in datasets.items():
+        indices = list(range(len(dataset)))
+        if max_samples is not None and len(indices) > max_samples:
+            indices = random.Random(sample_seed).sample(indices, max_samples)
+        pooled.extend((key, idx) for idx in indices)
+    random.Random(sample_seed).shuffle(pooled)
+    return pooled
+
+
+def split_dataset(datasets, iqa_model, pooled, batch_size, failure_threshold, success_threshold, target_count):
+    """Runs the model over `pooled` [(dataset_key, index), ...] (indices into `datasets[key]`) in
+    chunks of `batch_size`, bucketing each sample into failures (|pred - gt| >= failure_threshold)
+    or successes (|pred - gt| < success_threshold). Samples in between are discarded from both
+    buckets. Stops early once both buckets reach `target_count` (if given)."""
+    failures, successes = [], []
     for i in range(0, len(pooled), batch_size):
         if target_count is not None and len(failures) >= target_count and len(successes) >= target_count:
             break
         chunk = pooled[i:i + batch_size]
-        images, kept = [], []
-        for key, s in chunk:
-            try:
-                images.append(Image.open(os.path.join(image_folder, s.image)).convert("RGB"))
-            except (FileNotFoundError, OSError) as ex:
-                print(f"WARNING: skipping {s.image}: {ex}")
-                n_skipped += 1
-                continue
-            kept.append((key, s))
-        if not images:
-            continue
-        _, scores = iqa_model.predict(images)
-        for (key, s), pred in zip(kept, scores.tolist()):
+        batch = torch.stack([datasets[key][idx].image for key, idx in chunk])
+        _, scores = iqa_model.predict_tensors(batch)
+        for (key, idx), pred in zip(chunk, scores.tolist()):
+            s = datasets[key].list_data_dict[idx]
             diff = abs(pred - s.gt_score_norm)
             record = {"dataset": key, "image": s.image, "pred": pred, "gt": s.gt_score_norm, "abs_error": diff}
-            if diff >= failure_threshold:
-                if target_count is None or len(failures) < target_count:
-                    failures.append(record)
-            elif diff < success_threshold:
-                if target_count is None or len(successes) < target_count:
-                    successes.append(record)
-    if n_skipped:
-        print(f"  ({n_skipped} images skipped — not found locally)")
+            _bucket(record, failures, successes, failure_threshold, success_threshold, target_count)
     return failures, successes
 
 
@@ -80,12 +104,20 @@ def main(args):
 
     iqa_model = script_utils.load_model(args, device)
 
-    pooled = load_pooled_samples(args.dataset_keys, args.data_path, args.max_samples, args.sample_seed)
-    print(f"Pooled {len(pooled)} samples across {len(args.dataset_keys)} dataset(s)")
-
-    failures, successes = split_dataset(
-        iqa_model, pooled, args.image_folder, args.batch_size,
-        args.failure_threshold, args.success_threshold, args.target_count)
+    if iqa_model.model_type == "topiq_nr":
+        pooled = load_pooled_samples(args.dataset_keys, args.data_path, args.max_samples, args.sample_seed)
+        print(f"Pooled {len(pooled)} samples across {len(args.dataset_keys)} dataset(s)")
+        failures, successes = split_dataset_raw(
+            iqa_model, pooled, args.image_folder, args.batch_size,
+            args.failure_threshold, args.success_threshold, args.target_count)
+    else:
+        datasets = {key: script_utils.build_dataset(path, args.image_folder, iqa_model.processor)
+                    for key, path in zip(args.dataset_keys, args.data_path)}
+        pooled = load_pooled_indices(datasets, args.max_samples, args.sample_seed)
+        print(f"Pooled {len(pooled)} samples across {len(datasets)} dataset(s)")
+        failures, successes = split_dataset(
+            datasets, iqa_model, pooled, args.batch_size,
+            args.failure_threshold, args.success_threshold, args.target_count)
 
     print(f"\n{len(failures)} failures (|pred - gt| >= {args.failure_threshold}), "
           f"{len(successes)} successes (|pred - gt| < {args.success_threshold})")
