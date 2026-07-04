@@ -20,8 +20,10 @@ import zipfile
 from huggingface_hub import hf_hub_download
 
 sys.path.insert(0, ".")
-from src.constants import DOWNLOAD_DATASETS_ARG_SPECS, IQA_DATASET_ARCHIVES, IQA_DATASETS_HF_REPO_ID
-from src.datasets.gen_soft_label import generate_soft_labels
+from src.constants import (
+    DOWNLOAD_DATASETS_ARG_SPECS, IQA_DATASET_ARCHIVES, IQA_DATASETS_HF_REPO_ID, has_zhiyuanyou_metas,
+)
+from src.datasets.gen_soft_label import generate_pyiqa_mos_labels, generate_soft_labels
 
 
 def build_target_lookup(metas_dir):
@@ -88,6 +90,17 @@ def extract_matching(archive_path, lookup, data_root, force):
 def download_dataset(key, data_root, force):
     archive_name, dataset_dir = IQA_DATASET_ARCHIVES[key]
     metas_dir = os.path.join(data_root, dataset_dir, "metas")
+    if not has_zhiyuanyou_metas(key):
+        # This dataset ships no pre-built meta from zhiyuanyou/Data-DeQA-Score at all (today
+        # that's just flive) — build_target_lookup (below) needs *something* in metas_dir to
+        # know which images to pull out of the archive, so fall back to pyiqa's own meta_info
+        # mirror instead.
+        try:
+            generate_pyiqa_mos_labels(key, data_root, force=force)
+        except Exception as ex:
+            print(f"[{key}] WARNING: automatic label generation from pyiqa's meta_info mirror "
+                  f"failed ({ex}); this dataset has no zhiyuanyou/Data-DeQA-Score metadata and "
+                  f"needs a custom metas-generation approach.")
     lookup = build_target_lookup(metas_dir)
     if not lookup:
         print(f"[{key}] No meta jsons with an 'image' field found under {metas_dir}, skipping.")

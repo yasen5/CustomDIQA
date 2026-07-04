@@ -127,6 +127,97 @@ def generate_soft_labels(key, data_root, force=False):
     return True
 
 
+# Datasets pyiqa documents a meta_info CSV mirror for (chaofengc/IQA-PyTorch-Datasets-metainfo),
+# used by generate_pyiqa_mos_labels below as a fallback source of MOS values for any dataset key
+# that has no metadata from zhiyuanyou/Data-DeQA-Score at all (see has_zhiyuanyou_metas in
+# constants.py — today that's just flive). Each entry mirrors the relevant fields of pyiqa's own
+# pyiqa/default_dataset_configs.yml for that dataset. Add an entry here to extend the fallback to
+# another dataset key, rather than importing pyiqa itself (a heavy, torch-pulling dependency this
+# script otherwise doesn't need).
+PYIQA_META_INFO_REPO = "chaofengc/IQA-PyTorch-Datasets-metainfo"
+PYIQA_DATASET_META_INFO = {
+    "flive": {
+        "csv": "meta_info_FLIVEDataset.csv",
+        "mos_range": (0.0, 100.0),
+        "image_col": "img_name/patch_name",
+        "split_col": "official_split",
+        "phase": "test",
+        # the CSV also carries ~5.4k patch-crop rows (named "patches/*_patch_*.jpg") used for
+        # FLIVE's patch-level training task, not comparable to the single-score-per-photo
+        # benchmark this repo evaluates elsewhere.
+        "exclude_prefix": "patches/",
+    },
+}
+
+
+def generate_pyiqa_mos_labels(key, data_root, force=False):
+    """Builds metas/test.json for a dataset with no zhiyuanyou/Data-DeQA-Score metadata at all
+    (see has_zhiyuanyou_metas in constants.py), straight from pyiqa's own meta_info CSV mirror
+    (see PYIQA_DATASET_META_INFO above).
+
+    No per-image std is published this way (unlike koniq/spaq's mos.json), so std/std_norm are
+    left at 0 and level_probs are synthesized with get_binary_probs (mos-only, no Gaussian
+    density fit) rather than the approach `main` uses for koniq/spaq/kadid.
+
+    Raises KeyError if `key` has no entry in PYIQA_DATASET_META_INFO, or ValueError if its CSV
+    doesn't actually have the expected 'mos'/image columns — callers (see download_datasets.py)
+    should treat either as "this dataset needs a custom metas-generation approach".
+    """
+    import csv
+    from huggingface_hub import hf_hub_download
+
+    from src.constants import IQA_DATASET_ARCHIVES
+
+    if key not in PYIQA_DATASET_META_INFO:
+        raise KeyError(f"no pyiqa meta_info fallback registered for dataset {key!r}")
+    info = PYIQA_DATASET_META_INFO[key]
+
+    _, dataset_dir = IQA_DATASET_ARCHIVES[key]
+    metas_dir = os.path.join(data_root, dataset_dir, "metas")
+    test_path = os.path.join(metas_dir, "test.json")
+    if os.path.isfile(test_path) and not force:
+        return False
+
+    csv_path = hf_hub_download(repo_id=PYIQA_META_INFO_REPO, filename=info["csv"], repo_type="dataset")
+    min_mos, max_mos = info["mos_range"]
+    image_col = info["image_col"]
+
+    samples = []
+    with open(csv_path) as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        if "mos" not in fieldnames:
+            raise ValueError(f"{info['csv']} has no 'mos' column (found {fieldnames})")
+        if image_col not in fieldnames:
+            raise ValueError(f"{info['csv']} has no {image_col!r} column (found {fieldnames})")
+
+        for row in reader:
+            split_col = info.get("split_col")
+            if split_col and row.get(split_col) != info.get("phase", "test"):
+                continue
+            rel_path = row[image_col]
+            exclude_prefix = info.get("exclude_prefix")
+            if exclude_prefix and rel_path.startswith(exclude_prefix):
+                continue
+            mos = float(row["mos"])
+            mos_norm = 4 * (mos - min_mos) / (max_mos - min_mos) + 1  # mos_range -> [1, 5]
+            samples.append(SoftLabelSample(
+                id=os.path.basename(rel_path),
+                image=os.path.join(dataset_dir, "images", rel_path),
+                gt_score=mos,
+                gt_score_norm=float(mos_norm),
+                std=0.0,
+                std_norm=0.0,
+                level_probs=get_binary_probs(mos_norm),
+            ))
+
+    os.makedirs(metas_dir, exist_ok=True)
+    with open(test_path, "w") as f:
+        json.dump([s.to_json_dict() for s in samples], f, indent=4)
+    print(f"[{key}] wrote {len(samples)} whole-image test samples to {test_path}")
+    return True
+
+
 def main(cfg):
     density_type = cfg["density_type"]  # ["pdf", "cdf"]
     thre_std = cfg["thre_std"]

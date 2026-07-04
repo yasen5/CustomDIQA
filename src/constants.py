@@ -69,24 +69,40 @@ IQA_DATASET_ARCHIVES = {
     "pipal": ("pipal.tar", "PIPAL"),
     "livewild": ("live_challenge.tgz", "LIVE-WILD"),
     "agiqa3k": ("AGIQA-3K.zip", "AGIQA3K"),
+    "flive": ("flive.tgz", "FLIVE"),
 }
 DATA_DEQA_SCORE_DIR_DEFAULT = "data/Data-DeQA-Score"
 DATASET_KEYS = sorted(IQA_DATASET_ARCHIVES.keys())
-DATASET_KEYS_DEFAULT = [key for key in DATASET_KEYS if key != "kadid"]
+# flive is excluded like kadid: a ~5GB archive that needs its own meta generation
+# (see generate_pyiqa_mos_labels in gen_soft_label.py) rather than being ready for every default run.
+DATASET_KEYS_DEFAULT = [key for key in DATASET_KEYS if key not in ("kadid", "flive")]
 
 # metas/*.json filenames actually shipped per dataset — not uniform. koniq/spaq/kadid use
 # the train.json/test.json this repo generates (see generate_soft_labels below); pipal
-# ships its own pre-built train/test metas; tid2013/csiq/livewild/agiqa3k ship test-only
-# benchmark metas with no train split and no level_probs (eval-only, see resolve_dataset_paths).
+# ships its own pre-built train/test metas; tid2013/csiq/livewild/agiqa3k ship a single
+# test-only benchmark meta (see ORIGINAL_TEST_ONLY_META_FILENAMES) that scripts/split_train_test.py
+# partitions into metas/train.json + metas/test.json (run it once after downloading); flive has
+# no train split at all — see generate_pyiqa_mos_labels in gen_soft_label.py (it's eval-only, no
+# per-image std upstream, and has no entry in has_zhiyuanyou_metas below).
 DATASET_META_FILENAMES = {
     "koniq": {"train": "train.json", "test": "test.json"},
     "spaq": {"train": "train.json", "test": "test.json"},
     "kadid": {"train": "train.json", "test": "test.json"},
     "pipal": {"train": "train_pipal_19k.json", "test": "test_pipal_5k.json"},
-    "tid2013": {"train": None, "test": "test_tid2013_3k.json"},
-    "csiq": {"train": None, "test": "test_csiq_866.json"},
-    "livewild": {"train": None, "test": "test_livew_1k.json"},
-    "agiqa3k": {"train": None, "test": "test_agiqa_3k.json"},
+    "tid2013": {"train": "train.json", "test": "test.json"},
+    "csiq": {"train": "train.json", "test": "test.json"},
+    "livewild": {"train": "train.json", "test": "test.json"},
+    "agiqa3k": {"train": "train.json", "test": "test.json"},
+    "flive": {"train": None, "test": "test.json"},
+}
+
+# The single pre-built benchmark meta each test-only dataset ships with (under its own
+# metas/ dir), before scripts/split_train_test.py partitions it into train.json/test.json.
+ORIGINAL_TEST_ONLY_META_FILENAMES = {
+    "tid2013": "test_tid2013_3k.json",
+    "csiq": "test_csiq_866.json",
+    "livewild": "test_livew_1k.json",
+    "agiqa3k": "test_agiqa_3k.json",
 }
 
 # Shared by run_train.py and run_demo.py: dataset selection defaults to every dataset
@@ -186,6 +202,17 @@ SOFT_LABEL_DATASET_PARAMS = {
     "spaq": {"density_type": "cdf", "thre_std": 0.2, "thre_diff": 0.1},
     "kadid": {"density_type": "pdf", "thre_std": 0.2, "thre_diff": 0.1},
 }
+
+
+def has_zhiyuanyou_metas(key):
+    """Whether zhiyuanyou/Data-DeQA-Score ships *any* metadata for this dataset key: raw
+    mos.json+split.json (SOFT_LABEL_DATASET_PARAMS), pipal's own pre-built train/test metas, or
+    a single test-only benchmark meta (ORIGINAL_TEST_ONLY_META_FILENAMES). False only for flive
+    today — any other dataset key added to IQA_DATASET_ARCHIVES without a matching entry in one
+    of those three places falls through the same way, so scripts/download_datasets.py's call to
+    gen_soft_label.generate_pyiqa_mos_labels picks it up automatically instead of needing a
+    bespoke per-dataset special case."""
+    return key in SOFT_LABEL_DATASET_PARAMS or key == "pipal" or key in ORIGINAL_TEST_ONLY_META_FILENAMES
 
 DOWNLOAD_DATASETS_ARG_SPECS = [
     {
