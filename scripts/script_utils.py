@@ -12,8 +12,30 @@ from src.model import build_model, load_checkpoint, load_model_type
 from src.trainer import SimpleImageProcessor
 from src.utils import expand2square
 
-MODEL_CHOICES = ("vit", "cnn", "hybrid", "topiq_nr", "musiq")
+MODEL_CHOICES = ("vit", "cnn", "hybrid", "topiq_nr", "musiq", "qalign_mini")
+# The subset of MODEL_CHOICES that load_model() can build with no --model-path at all — i.e. every
+# pretrained-only IQA model this repo ships an off-the-shelf wrapper for (as opposed to vit/cnn/hybrid,
+# and musiq-with-a-checkpoint, which score with a locally trained head). Used by
+# scripts/run_eval_pretrained.py to eval "every pretrained model" without hardcoding the list twice.
+PRETRAINED_MODEL_TYPES = ("topiq_nr", "musiq", "qalign_mini")
 SCORE_WEIGHTS = np.array([5, 4, 3, 2, 1], dtype=np.float32)
+
+# checkpoints/ already doubles as the project-local cache for pyiqa weights (see
+# src/model/pyiqa_loader.py) — reuse it for this HF-hub model too rather than the transformers
+# default (~/.cache/huggingface), for the same "first run downloads, every run after (including a
+# fresh/sandboxed process) finds it already there" reason.
+QALIGN_CACHE_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "checkpoints", "qalign_pretrained",
+)
+QALIGN_MODEL_ID = "q-future/Q-ReAlign-Mini-0.8B"
+# This repo's shorthand for what the model itself is versioned as "Q-ReAlign — Mini (0.8B)": a
+# distilled, Qwen3.5-VL-based successor to Q-Align that reports matching-or-better SRCC/PLCC
+# against the original 7B Q-Align across seven QA benchmarks at a fraction of the size.
+QALIGN_LEVELS = ["excellent", "good", "fair", "poor", "bad"]
+QALIGN_LEVEL_WEIGHTS = np.array([1.0, 0.75, 0.5, 0.25, 0.0], dtype=np.float32)
+QALIGN_SCORE_RANGE = (0.0, 1.0)  # model card's documented output range for this scoring contract
+QALIGN_PROMPT = "How would you rate the quality of this image?"
+QALIGN_ANSWER_STEM = "The quality of the image is"
 
 # Matches CustomModel.predict()'s hardcoded expand2square call and scripts/preprocess_datasets.py's
 # default --image-aspect-ratio, since that's the only aspect-ratio handling any of these scripts apply.
@@ -32,6 +54,12 @@ TOPIQ_NR_MAX_SIDE = 2048
 # = -1, see src/model/musiq/constants.py), so — same OOM concern as topiq_nr above — raw phone photos
 # would otherwise blow the sequence length up unboundedly.
 MUSIQ_MAX_SIDE = 2048
+
+# Q-Align Mini's vision encoder tokenizes at (roughly) native resolution too, so token count — and
+# with it, latency — scales with input pixel count: on SPAQ's ~3000-5500px raw phone photos this ran
+# ~30x slower per image than every other dataset here (and would risk OOM at even larger sizes)
+# before this cap was added. Same rationale and value as TOPIQ_NR_MAX_SIDE/MUSIQ_MAX_SIDE above.
+QALIGN_MAX_SIDE = 2048
 
 
 def _cap_image_size(img, max_side):
@@ -63,7 +91,9 @@ def add_model_args(parser):
                               "TOPIQ-NR no-reference IQA metric instead of a local checkpoint. 'musiq' "
                               "uses this repo's manual MUSIQ reimplementation with pyiqa's pretrained "
                               "koniq10k weights when --model-path is omitted, or a local checkpoint "
-                              "when --model-path is provided.")
+                              "when --model-path is provided. 'qalign_mini' downloads and runs "
+                              "q-future/Q-ReAlign-Mini-0.8B (\"Q-Align Mini\") from the Hugging Face "
+                              "Hub instead of a local checkpoint.")
 
 
 def load_model(args, device):
@@ -76,6 +106,8 @@ def load_model(args, device):
         return TopiqNRModel(device)
     if args.model_type == "musiq" and args.model_path is None:
         return MusiqModel(device)
+    if args.model_type == "qalign_mini":
+        return QAlignMiniModel(device)
     return CustomModel(args, device)
 
 
@@ -239,4 +271,54 @@ class MusiqModel:
             probs = F.softmax(self.model(tensor), dim=-1).cpu().numpy()
             scores.append(float((probs * SCORE_WEIGHTS).sum()))
         return None, np.array(scores, dtype=np.float64)
+
+
+class QAlignMiniModel:
+    """Wraps q-future/Q-ReAlign-Mini-0.8B ("Q-Align Mini"), a Qwen3.5-VL-based vision-language
+    model downloaded from the Hugging Face Hub. Unlike vit/cnn/hybrid/topiq_nr/musiq (which read
+    a scalar/distribution off a vision backbone), this model is prompted with a fixed quality
+    question and scored by reading the next-token probability the model places on five
+    quality-level words (excellent/good/fair/poor/bad), collapsed into [0, 1] via fixed level
+    weights — the same "discrete text-defined levels" scoring contract as Q-Align, per the model
+    card's documented quick-start recipe."""
+
+    def __init__(self, device):
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+        os.makedirs(QALIGN_CACHE_DIR, exist_ok=True)
+        self.model_type = "qalign_mini"
+        self.device = device
+        self.processor = AutoProcessor.from_pretrained(QALIGN_MODEL_ID, cache_dir=QALIGN_CACHE_DIR)
+        self.model = AutoModelForImageTextToText.from_pretrained(
+            QALIGN_MODEL_ID, cache_dir=QALIGN_CACHE_DIR, dtype="auto",
+        ).to(device).eval()
+        # Leading-space match per the model card ("the five level tokens are matched with a
+        # leading space") — these are single-token ids in the model's vocabulary.
+        self.level_token_ids = [
+            self.processor.tokenizer(" " + level, add_special_tokens=False).input_ids[0]
+            for level in QALIGN_LEVELS
+        ]
+        messages = [{"role": "user", "content": [
+            {"type": "image"},
+            {"type": "text", "text": QALIGN_PROMPT},
+        ]}]
+        self._prompt_text = self.processor.apply_chat_template(
+            messages, add_generation_prompt=True) + QALIGN_ANSWER_STEM
+        print(f"Loaded {QALIGN_MODEL_ID} (Q-Align Mini, 0.8B)")
+
+    @torch.inference_mode()
+    def predict(self, pil_images):
+        # One image (one forward pass) at a time: unlike topiq_nr/musiq this model's processor
+        # *could* batch same-prompt/different-size images with padding, but scoring here only
+        # reads a single next-token distribution per sample, so batching would trade a little
+        # throughput for meaningfully more code — not worth it for an eval harness.
+        scores = []
+        for img in pil_images:
+            img = _cap_image_size(img, QALIGN_MAX_SIDE)
+            inputs = self.processor(
+                text=[self._prompt_text], images=[img], return_tensors="pt").to(self.device)
+            logits = self.model(**inputs).logits[0, -1, self.level_token_ids]
+            probs = F.softmax(logits.float(), dim=-1).cpu().numpy()
+            scores.append(float((probs * QALIGN_LEVEL_WEIGHTS).sum()))
+        scores = _rescale(np.array(scores, dtype=np.float64), QALIGN_SCORE_RANGE, GT_SCORE_RANGE)
+        return None, scores
 
