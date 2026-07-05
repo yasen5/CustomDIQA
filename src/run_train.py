@@ -74,8 +74,9 @@ if __name__ == "__main__":
     parser.add_argument("--pretrained", choices=PRETRAINED_TYPES, default=TRAIN_PRETRAINED_DEFAULT,
                         help="Initialize the backbone from an external pretrained model: "
                              "'dinov2' (vit only, first N transformer blocks + patch-embed), "
-                             "'imagenet' (cnn only, full EfficientNet-B0 backbone transfer), or "
-                             "'topiq_nr' (hybrid only, full TOPIQ-NR CFANet backbone transfer). "
+                             "'imagenet' (cnn only, full EfficientNet-B0 backbone transfer), "
+                             "'topiq_nr' (hybrid only, full TOPIQ-NR CFANet backbone transfer), or "
+                             "'musiq_koniq' (musiq only, full MUSIQ koniq10k tokenizer+encoder transfer). "
                              "One-time network fetch on first use, cached afterward.")
     parser.add_argument("--augment", action="store_true",
                         help="Apply mild random-crop + horizontal-flip augmentation (recommended for vit)")

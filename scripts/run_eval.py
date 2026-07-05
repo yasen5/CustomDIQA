@@ -31,7 +31,7 @@ def predict_dataset(iqa_model, key, path, image_folder, batch_size, max_samples,
     script_utils.build_dataset (SingleDataset — cache-aware) for fixed-size-processor models, or
     script_utils.predict_raw_items (raw PIL, native resolution) for topiq_nr — see script_utils.py
     for why those two paths can't be unified further."""
-    if iqa_model.model_type == "topiq_nr":
+    if iqa_model.model_type in ("topiq_nr", "musiq"):
         samples = load_soft_label_samples(path)
         if max_samples is not None and len(samples) > max_samples:
             samples = random.Random(sample_seed).sample(samples, max_samples)

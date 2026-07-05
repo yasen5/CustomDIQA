@@ -8,11 +8,14 @@ from .cnn.model import EfficientNet
 from .cnn import constants as cnn_constants
 from .hybrid.model import HybridModel
 from .hybrid import constants as hybrid_constants
+from .musiq.model import MUSIQModel
+from .musiq import constants as musiq_constants
 
 MODEL_REGISTRY = {
     "vit": (EncoderModel, vit_constants),
     "cnn": (EfficientNet, cnn_constants),
     "hybrid": (HybridModel, hybrid_constants),
+    "musiq": (MUSIQModel, musiq_constants),
 }
 
 MODEL_TYPE_FILENAME = "model_type.txt"
@@ -38,6 +41,11 @@ def build_model(model_type: str, pretrained: str | None = None):
             raise ValueError("--pretrained topiq_nr is only supported for --model-type hybrid")
         from .hybrid.pretrained import load_topiq_nr_pretrained
         load_topiq_nr_pretrained(model)
+    elif pretrained == "musiq_koniq":
+        if model_type != "musiq":
+            raise ValueError("--pretrained musiq_koniq is only supported for --model-type musiq")
+        from .musiq.pretrained import load_musiq_koniq_pretrained
+        load_musiq_koniq_pretrained(model)
     elif pretrained is not None:
         raise ValueError(f"Unknown pretrained option {pretrained!r}")
     return model, constants

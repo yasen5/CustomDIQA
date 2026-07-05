@@ -51,9 +51,9 @@ TRAIN_BACKBONE_WARMUP_STEPS_DEFAULT = 20
 TRAIN_WEIGHT_DECAY_DEFAULT = 0.05
 TRAIN_HEAD_WEIGHT_DECAY_DEFAULT = 0.0
 TRAIN_PRETRAINED_DEFAULT = None
-PRETRAINED_TYPES = ("dinov2", "imagenet", "topiq_nr")
+PRETRAINED_TYPES = ("dinov2", "imagenet", "topiq_nr", "musiq_koniq")
 
-MODEL_TYPES = ("vit", "cnn", "hybrid")
+MODEL_TYPES = ("vit", "cnn", "hybrid", "musiq")
 TRAIN_MODEL_TYPE_DEFAULT = "vit"
 
 # Mirrors the archives referenced by the DeQA-Score meta files (image paths under

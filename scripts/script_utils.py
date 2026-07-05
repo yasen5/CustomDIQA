@@ -12,7 +12,7 @@ from src.model import build_model, load_checkpoint, load_model_type
 from src.trainer import SimpleImageProcessor
 from src.utils import expand2square
 
-MODEL_CHOICES = ("vit", "cnn", "hybrid", "topiq_nr")
+MODEL_CHOICES = ("vit", "cnn", "hybrid", "topiq_nr", "musiq")
 SCORE_WEIGHTS = np.array([5, 4, 3, 2, 1], dtype=np.float32)
 
 # Matches CustomModel.predict()'s hardcoded expand2square call and scripts/preprocess_datasets.py's
@@ -27,6 +27,11 @@ GT_SCORE_RANGE = (1.0, 5.0)        # this repo's MOS scale (see gen_soft_label.p
 # (e.g. SPAQ, ~3000-5500px) OOM an 11GB GPU; this cap only kicks in above that size, so every
 # other dataset here (already downscaled) still scores at true native resolution.
 TOPIQ_NR_MAX_SIDE = 2048
+
+# MUSIQ's native-resolution scale keeps every patch unpadded/untruncated (max_seq_len_from_original_res
+# = -1, see src/model/musiq/constants.py), so — same OOM concern as topiq_nr above — raw phone photos
+# would otherwise blow the sequence length up unboundedly.
+MUSIQ_MAX_SIDE = 2048
 
 
 def _cap_image_size(img, max_side):
@@ -48,21 +53,29 @@ def add_model_args(parser):
     parser.add_argument("--model-path", default=None,
                          help="Checkpoint dir or weights file. Required for --model-type vit/cnn/hybrid "
                               "(unless --model-type is omitted and can be read from the checkpoint "
-                              "dir's model_type.txt); ignored for topiq_nr, which uses pyiqa's own "
-                              "pretrained weights.")
+                              "dir's model_type.txt); ignored for topiq_nr and for musiq without a "
+                              "model path, which use "
+                              "pretrained weights instead of a local checkpoint.")
     parser.add_argument("--model-type", choices=MODEL_CHOICES, default=None,
                          help="'vit'/'cnn'/'hybrid' load a trained checkpoint from --model-path (overrides "
                               "the checkpoint's recorded type; required if --model-path is a weights "
                               "file rather than a checkpoint dir). 'topiq_nr' uses pyiqa's pretrained "
-                              "TOPIQ-NR no-reference IQA metric instead of a local checkpoint.")
+                              "TOPIQ-NR no-reference IQA metric instead of a local checkpoint. 'musiq' "
+                              "uses this repo's manual MUSIQ reimplementation with pyiqa's pretrained "
+                              "koniq10k weights when --model-path is omitted, or a local checkpoint "
+                              "when --model-path is provided.")
 
 
 def load_model(args, device):
     """Factory returning a model wrapper with a uniform .predict(pil_images) -> (probs_or_None, scores)
     interface and a .model_type label, regardless of whether the backend is a local checkpoint or a
-    pyiqa metric."""
+    pyiqa metric. 'musiq' with no --model-path falls back to MusiqModel (pretrained backbone + a
+    freshly-initialized, un-fine-tuned head — the "untuned" baseline); with --model-path it's a
+    fine-tuned checkpoint like vit/cnn/hybrid, so it goes through CustomModel instead."""
     if args.model_type == "topiq_nr":
         return TopiqNRModel(device)
+    if args.model_type == "musiq" and args.model_path is None:
+        return MusiqModel(device)
     return CustomModel(args, device)
 
 
@@ -194,3 +207,36 @@ class TopiqNRModel:
             scores.append(self.metric(tensor).item())
         scores = _rescale(np.array(scores, dtype=np.float32), TOPIQ_NR_SCORE_RANGE, GT_SCORE_RANGE)
         return None, scores
+
+
+class MusiqModel:
+    """Wraps this repo's manual MUSIQ reimplementation (src/model/musiq): pyiqa's pretrained
+    koniq10k tokenizer+encoder weights feeding our own 5-way MeanOpinionScoreHead, which is left
+    randomly initialized (never fine-tuned) — the "untuned" baseline behind the same uniform
+    interface as TopiqNRModel. A fine-tuned musiq checkpoint is evaluated via CustomModel instead
+    (see load_model above), not this class."""
+
+    def __init__(self, device):
+        from src.model.musiq import MUSIQModel
+        from src.model.musiq.pretrained import load_musiq_koniq_pretrained
+        self.model_type = "musiq"
+        self.device = device
+        model = MUSIQModel().to(device=device, dtype=torch.float32)
+        load_musiq_koniq_pretrained(model)
+        model.eval()
+        self.model = model
+        print("Loaded musiq model (manual implementation, pyiqa koniq10k backbone, untuned head)")
+
+    @torch.inference_mode()
+    def predict(self, pil_images):
+        # Native-resolution, one image at a time: MUSIQ's multiscale patch extraction is defined
+        # per-image and images vary in size so can't be batched. Images above MUSIQ_MAX_SIDE are
+        # downscaled to avoid OOM (see comment there).
+        scores = []
+        for img in pil_images:
+            img = _cap_image_size(img, MUSIQ_MAX_SIDE)
+            tensor = TF.to_tensor(img).unsqueeze(0).to(self.device)
+            probs = F.softmax(self.model(tensor), dim=-1).cpu().numpy()
+            scores.append(float((probs * SCORE_WEIGHTS).sum()))
+        return None, np.array(scores, dtype=np.float64)
+
