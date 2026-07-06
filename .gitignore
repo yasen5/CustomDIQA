@@ -223,3 +223,4 @@ checkpoints/
 *.png
 dataset_split_failures.json
 analysis-results/
+*.csv
