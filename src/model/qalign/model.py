@@ -168,6 +168,7 @@ class QAlignMiniIQA:
     @torch.inference_mode()
     def predict(self, pil_images):
         scores = []
+        all_probs = []
         for img in pil_images:
             img = _cap_image_size(img, constants.QALIGN_MAX_SIDE)
             inputs = self.processor(
@@ -179,7 +180,8 @@ class QAlignMiniIQA:
             # input_ids/attention/mm types: (1, seq_len); pixel_values: (T*H*W, 1536);
             # image_grid_thw: (1, 3). level_logits: (1, 5).
             level_logits = self.model(**inputs, level_token_ids=self.level_token_ids)
-            probs = F.softmax(level_logits.float(), dim=-1).cpu().numpy()
+            probs = F.softmax(level_logits.float(), dim=-1).cpu().numpy()[0]
+            all_probs.append(probs)
             scores.append(float((probs * constants.QALIGN_LEVEL_WEIGHTS).sum()))
 
         import numpy as np
@@ -189,4 +191,4 @@ class QAlignMiniIQA:
             constants.QALIGN_SCORE_RANGE,
             (1.0, 5.0),
         )
-        return None, scores
+        return np.stack(all_probs), scores
