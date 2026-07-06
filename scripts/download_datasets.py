@@ -1,5 +1,5 @@
 """
-Download the classic IQA dataset images (KONIQ, SPAQ, KADID10K, TID2013, CSIQ,
+Download the classic IQA dataset images (KONIQ512/KONIQ1024, SPAQ, KADID10K, TID2013, CSIQ,
 PIPAL, LIVE-Wild, AGIQA3K) referenced by data/Data-DeQA-Score/<DATASET>/metas/*.json.
 
 zhiyuanyou/Data-DeQA-Score on the HF Hub only ships label jsons, not pixels, so the
@@ -21,7 +21,12 @@ from huggingface_hub import hf_hub_download
 
 sys.path.insert(0, ".")
 from src.constants import (
-    DOWNLOAD_DATASETS_ARG_SPECS, IQA_DATASET_ARCHIVES, IQA_DATASETS_HF_REPO_ID, has_zhiyuanyou_metas,
+    DOWNLOAD_DATASET_KEYS_DEFAULT,
+    DOWNLOAD_DATASETS_ARG_SPECS,
+    IQA_DATASET_ARCHIVES,
+    IQA_DATASETS_HF_REPO_ID,
+    KONIQ_ARCHIVE_IMAGE_DIRS,
+    has_zhiyuanyou_metas,
 )
 from src.datasets.gen_soft_label import generate_pyiqa_mos_labels, generate_soft_labels
 
@@ -47,19 +52,27 @@ def build_target_lookup(metas_dir):
     return lookup
 
 
-def extract_matching(archive_path, lookup, data_root, force):
+def _member_target(member_name, lookup, archive_image_dir):
+    member_name = member_name.replace("\\", "/")
+    if archive_image_dir is not None:
+        archive_image_dir = archive_image_dir.rstrip("/")
+        if not member_name.startswith(archive_image_dir + "/"):
+            return None
+    return lookup.get(os.path.basename(member_name))
+
+
+def extract_matching(archive_path, lookup, data_root, force, archive_image_dir=None):
     matched = set()
     if archive_path.endswith(".zip"):
         with zipfile.ZipFile(archive_path) as zf:
             for info in zf.infolist():
                 if info.is_dir():
                     continue
-                basename = os.path.basename(info.filename)
-                target = lookup.get(basename)
+                target = _member_target(info.filename, lookup, archive_image_dir)
                 if target is None:
                     continue
                 dest = os.path.join(data_root, target)
-                matched.add(basename)
+                matched.add(os.path.basename(info.filename))
                 if os.path.exists(dest) and not force:
                     continue
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -70,12 +83,11 @@ def extract_matching(archive_path, lookup, data_root, force):
             for member in tf:
                 if not member.isfile():
                     continue
-                basename = os.path.basename(member.name)
-                target = lookup.get(basename)
+                target = _member_target(member.name, lookup, archive_image_dir)
                 if target is None:
                     continue
                 dest = os.path.join(data_root, target)
-                matched.add(basename)
+                matched.add(os.path.basename(member.name))
                 if os.path.exists(dest) and not force:
                     continue
                 src = tf.extractfile(member)
@@ -101,6 +113,8 @@ def download_dataset(key, data_root, force):
             print(f"[{key}] WARNING: automatic label generation from pyiqa's meta_info mirror "
                   f"failed ({ex}); this dataset has no zhiyuanyou/Data-DeQA-Score metadata and "
                   f"needs a custom metas-generation approach.")
+    if generate_soft_labels(key, data_root, force=force):
+        print(f"[{key}] Generated metas/train.json + metas/test.json from mos.json/split.json.")
     lookup = build_target_lookup(metas_dir)
     if not lookup:
         print(f"[{key}] No meta jsons with an 'image' field found under {metas_dir}, skipping.")
@@ -114,8 +128,10 @@ def download_dataset(key, data_root, force):
         repo_type="dataset",
     )
 
-    print(f"[{key}] Extracting matching images into {os.path.join(data_root, dataset_dir, 'images')}...")
-    matched = extract_matching(archive_path, lookup, data_root, force)
+    archive_image_dir = KONIQ_ARCHIVE_IMAGE_DIRS.get(key)
+    suffix = f" from archive dir {archive_image_dir}" if archive_image_dir else ""
+    print(f"[{key}] Extracting matching images{suffix} into {os.path.join(data_root, dataset_dir, 'images')}...")
+    matched = extract_matching(archive_path, lookup, data_root, force, archive_image_dir=archive_image_dir)
 
     missing = sorted(set(lookup) - matched)
     print(f"[{key}] {len(matched)}/{len(lookup)} images found in archive.")
@@ -123,12 +139,9 @@ def download_dataset(key, data_root, force):
         preview = ", ".join(missing[:10])
         print(f"[{key}] WARNING: {len(missing)} images missing from archive, e.g. {preview}")
 
-    if generate_soft_labels(key, data_root, force=force):
-        print(f"[{key}] Generated metas/train.json + metas/test.json from mos.json/split.json.")
-
 
 def main(datasets, data_root, force):
-    keys = datasets or sorted(IQA_DATASET_ARCHIVES.keys())
+    keys = datasets or DOWNLOAD_DATASET_KEYS_DEFAULT
     for key in keys:
         download_dataset(key, data_root, force)
 

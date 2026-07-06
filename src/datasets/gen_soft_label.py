@@ -100,21 +100,24 @@ def generate_soft_labels(key, data_root, force=False):
     """(Re)build metas/train.json + metas/test.json for a dataset from its raw
     metas/mos.json + metas/split.json, if both are present and the dataset has
     known density-fit params. Returns False (no-op) if either precondition isn't met."""
-    from src.constants import IQA_DATASET_ARCHIVES, SOFT_LABEL_DATASET_PARAMS
+    from src.constants import DATASET_META_SOURCE_DIRS, IQA_DATASET_ARCHIVES, SOFT_LABEL_DATASET_PARAMS
 
     params = SOFT_LABEL_DATASET_PARAMS.get(key)
     if params is None:
         return False
     _, dataset_dir = IQA_DATASET_ARCHIVES[key]
-    metas_dir = os.path.join(data_root, dataset_dir, "metas")
-    mos_json = os.path.join(metas_dir, "mos.json")
-    split_json = os.path.join(metas_dir, "split.json")
+    source_dataset_dir = DATASET_META_SOURCE_DIRS.get(key, dataset_dir)
+    source_metas_dir = os.path.join(data_root, source_dataset_dir, "metas")
+    mos_json = os.path.join(source_metas_dir, "mos.json")
+    split_json = os.path.join(source_metas_dir, "split.json")
     if not (os.path.isfile(mos_json) and os.path.isfile(split_json)):
         return False
+    metas_dir = os.path.join(data_root, dataset_dir, "metas")
     save_train = os.path.join(metas_dir, "train.json")
     save_test = os.path.join(metas_dir, "test.json")
     if not force and os.path.isfile(save_train) and os.path.isfile(save_test):
         return False
+    os.makedirs(metas_dir, exist_ok=True)
 
     main({
         "mos_json": mos_json,

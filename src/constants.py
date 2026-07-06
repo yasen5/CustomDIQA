@@ -61,6 +61,13 @@ TRAIN_MODEL_TYPE_DEFAULT = "vit"
 # zhiyuanyou/Data-DeQA-Score on the HF Hub only ships labels, not pixels.
 IQA_DATASETS_HF_REPO_ID = "chaofengc/IQA-PyTorch-Datasets"
 IQA_DATASET_ARCHIVES = {
+    # The upstream KonIQ archive contains both 512x384 and 1024x768 copies with the same
+    # basenames. Keep them as separate dataset keys/paths so a basename-only extract cannot
+    # silently overwrite or skip the intended resolution.
+    "koniq512": ("koniq10k.tgz", "KONIQ512"),
+    "koniq1024": ("koniq10k.tgz", "KONIQ1024"),
+    # Legacy path used by older local runs. It is intentionally excluded from defaults below;
+    # prefer koniq1024 for official-resolution evaluation, or koniq512 for the small images.
     "koniq": ("koniq10k.tgz", "KONIQ"),
     "spaq": ("spaq.tgz", "SPAQ"),
     "kadid": ("kadid10k.tgz", "KADID10K"),
@@ -71,11 +78,23 @@ IQA_DATASET_ARCHIVES = {
     "agiqa3k": ("AGIQA-3K.zip", "AGIQA3K"),
     "flive": ("flive.tgz", "FLIVE"),
 }
+KONIQ_ARCHIVE_IMAGE_DIRS = {
+    "koniq512": "koniq10k/512x384",
+    "koniq1024": "koniq10k/1024x768",
+}
+# koniq512/koniq1024 reuse the same raw MOS/split files as the legacy KONIQ metadata, but
+# write their generated train/test metas under separate output dirs with separate image paths.
+DATASET_META_SOURCE_DIRS = {
+    "koniq512": "KONIQ",
+    "koniq1024": "KONIQ",
+}
 DATA_DEQA_SCORE_DIR_DEFAULT = "data/Data-DeQA-Score"
 DATASET_KEYS = sorted(IQA_DATASET_ARCHIVES.keys())
 # flive is excluded like kadid: a ~5GB archive that needs its own meta generation
 # (see generate_pyiqa_mos_labels in gen_soft_label.py) rather than being ready for every default run.
-DATASET_KEYS_DEFAULT = [key for key in DATASET_KEYS if key not in ("kadid", "flive")]
+# koniq1024 is the default KonIQ variant because it matches the official-resolution benchmark.
+DATASET_KEYS_DEFAULT = [key for key in DATASET_KEYS if key not in ("kadid", "flive", "koniq", "koniq512")]
+DOWNLOAD_DATASET_KEYS_DEFAULT = [key for key in DATASET_KEYS if key != "koniq"]
 
 # metas/*.json filenames actually shipped per dataset — not uniform. koniq/spaq/kadid use
 # the train.json/test.json this repo generates (see generate_soft_labels below); pipal
@@ -85,6 +104,8 @@ DATASET_KEYS_DEFAULT = [key for key in DATASET_KEYS if key not in ("kadid", "fli
 # no train split at all — see generate_pyiqa_mos_labels in gen_soft_label.py (it's eval-only, no
 # per-image std upstream, and has no entry in has_zhiyuanyou_metas below).
 DATASET_META_FILENAMES = {
+    "koniq512": {"train": "train.json", "test": "test.json"},
+    "koniq1024": {"train": "train.json", "test": "test.json"},
     "koniq": {"train": "train.json", "test": "test.json"},
     "spaq": {"train": "train.json", "test": "test.json"},
     "kadid": {"train": "train.json", "test": "test.json"},
@@ -114,7 +135,8 @@ DATASET_SELECT_ARG_SPECS = [
             "nargs": "+",
             "choices": DATASET_KEYS,
             "default": DATASET_KEYS_DEFAULT,
-            "help": "Datasets to use (default: all datasets with downloadable images except kadid)",
+            "help": "Datasets to use (default: standard eval set with koniq1024; excludes kadid, flive, "
+                    "legacy koniq, and koniq512)",
         },
     },
     {
@@ -198,6 +220,8 @@ def resolve_dataset_paths(datasets, exclude_datasets, data_root, split):
 # density_type follows the DeQA-Score appendix: pdf fits larger-std datasets
 # (KonIQ, KADID) better, cdf fits smaller-std ones (SPAQ) better.
 SOFT_LABEL_DATASET_PARAMS = {
+    "koniq512": {"density_type": "pdf", "thre_std": 0.2, "thre_diff": 0.1},
+    "koniq1024": {"density_type": "pdf", "thre_std": 0.2, "thre_diff": 0.1},
     "koniq": {"density_type": "pdf", "thre_std": 0.2, "thre_diff": 0.1},
     "spaq": {"density_type": "cdf", "thre_std": 0.2, "thre_diff": 0.1},
     "kadid": {"density_type": "pdf", "thre_std": 0.2, "thre_diff": 0.1},
@@ -221,7 +245,7 @@ DOWNLOAD_DATASETS_ARG_SPECS = [
             "nargs": "+",
             "choices": DATASET_KEYS,
             "default": None,
-            "help": "Which datasets to download (default: all of them)",
+            "help": "Which datasets to download (default: all non-legacy dataset keys)",
         },
     },
     {
