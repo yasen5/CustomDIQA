@@ -251,3 +251,42 @@ class MusiqModel:
         return None, np.array(scores, dtype=np.float64)
 
 
+MUSIQ_KONIQ_SCORE_RANGE = (0.0, 100.0)  # pyiqa's documented (approximate) score_range for musiq's
+                                          # pretrained koniq10k head: "~0, ~100"
+
+
+class MusiqNativeModel:
+    """Wraps pyiqa's own pretrained MUSIQ metric (koniq10k checkpoint, including its native 1-d
+    regression head) — unlike MusiqModel above, which reuses this repo's manual reimplementation
+    with a freshly-initialized, never-fine-tuned head. Use this where MUSIQ's score needs to
+    reflect what the pretrained model actually predicts (e.g. comparing it against other
+    pretrained models), rather than MusiqModel's "untuned baseline" behind the same uniform
+    interface as TopiqNRModel."""
+
+    def __init__(self, device):
+        try:
+            import pyiqa
+        except ImportError:
+            raise RuntimeError(
+                "musiq (native) requires the 'pyiqa' package. Install it with `pip install pyiqa`."
+            )
+        from src.model.pyiqa_loader import configure_pyiqa_cache
+        configure_pyiqa_cache()
+        self.model_type = "musiq"
+        self.device = device
+        self.metric = pyiqa.create_metric("musiq", device=device)
+        print("Loaded musiq model (pyiqa's own pretrained MUSIQ metric, koniq10k checkpoint, native head)")
+
+    @torch.inference_mode()
+    def predict(self, pil_images):
+        # Native-resolution, one image at a time: same rationale as TopiqNRModel/MusiqModel above.
+        # Images above MUSIQ_MAX_SIDE are downscaled to avoid OOM (see comment there).
+        scores = []
+        for img in pil_images:
+            img = _cap_image_size(img, MUSIQ_MAX_SIDE)
+            tensor = TF.to_tensor(img).unsqueeze(0).to(self.device)
+            scores.append(self.metric(tensor).item())
+        scores = _rescale(np.array(scores, dtype=np.float32), MUSIQ_KONIQ_SCORE_RANGE, GT_SCORE_RANGE)
+        return None, scores
+
+
