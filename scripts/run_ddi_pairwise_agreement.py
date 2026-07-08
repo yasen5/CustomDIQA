@@ -6,6 +6,16 @@ draws a pool of random image pairs and reports, for every pair of models (e.g. (
 (topiq_nr, qalign_mini), (musiq, qalign_mini)), the fraction of pairs where both models rank the
 same image higher — a boolean pairwise-preference agreement rate.
 
+Can also include "deqa" in --model-types. Unlike the other models, DeQA-Score can't be constructed
+in this process (its vendored modeling code needs an older pinned transformers than this venv has
+-- see src/model/deqa/constants.py), so its scores are instead read from a CSV cache built
+separately under deqa_venv:
+
+    deqa_venv/bin/python3 scripts/run_ddi_deqa_scores.py
+
+Run that first (it scores every DDI image once and is cheap to re-run -- already-cached files are
+skipped) before passing --model-types ... deqa here.
+
 Saves:
   - a per-pair CSV with both images' scores from every model and each model's "image_a scores
     higher than image_b" boolean
@@ -14,7 +24,7 @@ Saves:
 
 Usage:
     python scripts/run_ddi_pairwise_agreement.py [--model-types TYPE [TYPE ...]] [--image-dir DIR]
-        [--metadata CSV] [--output-dir DIR] [--num-pairs N] [--seed N]
+        [--metadata CSV] [--output-dir DIR] [--num-pairs N] [--seed N] [--deqa-scores-cache CSV]
 """
 import argparse
 import itertools
@@ -31,6 +41,31 @@ from src.trainer import get_device
 import script_utils
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEQA_SCORES_CACHE_DEFAULT = os.path.join(REPO_ROOT, "validation", "ddi_deqa_scores.csv")
+ALL_MODEL_TYPES = tuple(script_utils.PRETRAINED_MODEL_TYPES) + ("deqa",)
+
+
+def load_deqa_scores(cache_path, files):
+    """Reads the {DDI_file: deqa_score} cache built by run_ddi_deqa_scores.py (run under
+    deqa_venv) and returns a {file: score} dict restricted to `files`. Raises with a clear
+    pointer to that script if the cache is missing entirely or doesn't cover every needed file --
+    DeQA can't be scored in this process (see module docstring), so there's no in-process fallback."""
+    if not os.path.exists(cache_path):
+        raise SystemExit(
+            f"--model-types includes 'deqa' but no score cache found at {cache_path}. Run:\n"
+            f"  deqa_venv/bin/python3 scripts/run_ddi_deqa_scores.py\n"
+            f"first to precompute DeQA scores (DeQA can't be loaded in this venv -- see "
+            f"src/model/deqa/constants.py).")
+    cache_df = pd.read_csv(cache_path)
+    scores = dict(zip(cache_df["DDI_file"], cache_df["deqa_score"]))
+    missing = [f for f in files if f not in scores]
+    if missing:
+        raise SystemExit(
+            f"{len(missing)} of {len(files)} needed DDI files are missing from the deqa score "
+            f"cache at {cache_path} (e.g. {missing[:5]}). Run:\n"
+            f"  deqa_venv/bin/python3 scripts/run_ddi_deqa_scores.py\n"
+            f"to (re-)score them -- already-cached files are skipped, so this is cheap to re-run.")
+    return {f: scores[f] for f in files}
 
 
 def sample_pairs(files, num_pairs, seed):
@@ -135,9 +170,14 @@ def main():
         description="Sample a pool of DDI image pairs and measure, for every pair of this repo's "
                      "pretrained IQA models (topiq_nr, musiq, qalign_mini), how often they agree on "
                      "which image in each pair is higher quality.")
-    parser.add_argument("--model-types", nargs="+", choices=script_utils.PRETRAINED_MODEL_TYPES,
+    parser.add_argument("--model-types", nargs="+", choices=ALL_MODEL_TYPES,
                          default=list(script_utils.PRETRAINED_MODEL_TYPES),
-                         help="Which pretrained models to compare (default: all of them)")
+                         help="Which pretrained models to compare (default: all of them, excluding "
+                              "deqa since it requires a precomputed score cache -- see module docstring)")
+    parser.add_argument("--deqa-scores-cache", default=DEQA_SCORES_CACHE_DEFAULT,
+                         help="CSV cache of DeQA scores built by "
+                              "'deqa_venv/bin/python3 scripts/run_ddi_deqa_scores.py'. Only read "
+                              "if 'deqa' is in --model-types.")
     parser.add_argument("--image-dir", default=os.path.join(REPO_ROOT, "ddi_data"))
     parser.add_argument("--metadata", default=os.path.join(REPO_ROOT, "ddi_metadata.csv"))
     parser.add_argument("--output-dir", default=os.path.join(REPO_ROOT, "validation", "ddi_pairwise_agreement"))
@@ -167,6 +207,11 @@ def main():
     scores_by_model = {}
     for model_type in args.model_types:
         print(f"\n{f' Scoring with pretrained model: {model_type} ':=^88}")
+        if model_type == "deqa":
+            # Can't be constructed in this process -- read from the cache built separately under
+            # deqa_venv (see load_deqa_scores/module docstring).
+            scores_by_model[model_type] = load_deqa_scores(args.deqa_scores_cache, pool_files)
+            continue
         if model_type == "musiq":
             # Same rationale as run_ddi_model_agreement.py: use pyiqa's own pretrained MUSIQ head
             # (real predictions) rather than script_utils.MusiqModel's untuned-head reimplementation.
