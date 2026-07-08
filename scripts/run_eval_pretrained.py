@@ -26,13 +26,20 @@ from run_eval import compute_metrics
 OUT_JSON_DEFAULT = os.path.join(ANALYSIS_RESULTS_DIR, "eval_pretrained.json")
 
 
-def predict_dataset_timed(iqa_model, key, path, image_folder, batch_size, max_samples, sample_seed):
+def predict_dataset_timed(iqa_model, key, path, image_folder, batch_size, max_samples, sample_seed,
+                           sample_fraction=None):
     """Runs `iqa_model` (topiq_nr/musiq/qalign_mini — all native-resolution, raw-PIL models; see
     script_utils.predict_raw_items) over dataset `key`'s samples at `path`. Returns (pred_scores,
     gt_scores, total_seconds), where total_seconds is the summed wall-clock time spent inside
     iqa_model.predict (forward passes only — image decode/load happens before the timer starts
-    each batch, so I/O speed doesn't pollute the inference-time comparison across models)."""
+    each batch, so I/O speed doesn't pollute the inference-time comparison across models).
+
+    sample_fraction (0, 1], if given, takes precedence over max_samples and is applied per-dataset
+    (e.g. 0.25 keeps a random quarter of *this* dataset's samples, rather than max_samples' fixed
+    count shared across every dataset regardless of size)."""
     samples = load_soft_label_samples(path)
+    if sample_fraction is not None:
+        max_samples = max(1, round(sample_fraction * len(samples)))
     if max_samples is not None and len(samples) > max_samples:
         samples = random.Random(sample_seed).sample(samples, max_samples)
     print(f"\n[{key}] evaluating {len(samples)} samples from {path}")
@@ -117,7 +124,7 @@ def evaluate(args):
         for key, path in zip(args.dataset_keys, args.data_path):
             preds, gts, total_time = predict_dataset_timed(
                 iqa_model, key, path, args.image_folder, args.batch_size,
-                args.max_samples, args.sample_seed)
+                args.max_samples, args.sample_seed, sample_fraction=args.sample_fraction)
             metrics = compute_metrics(preds, gts)
             if metrics is None:
                 print(f"  WARNING: fewer than 2 usable samples for {key!r}, skipping")
@@ -161,7 +168,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Evaluate every pretrained (no-checkpoint-required) IQA model in this repo "
                      "— topiq_nr, musiq, and qalign_mini — across datasets, reporting SRCC/PLCC/"
-                     "MAE/RMSE plus average per-image inference time.")
+                     "MAE/RMSE plus average per-image inference time. (DeQA-Score is evaluated "
+                     "separately: see scripts/run_eval_deqa.py, run under deqa_venv.)")
     parser.add_argument("--model-types", nargs="+", choices=script_utils.PRETRAINED_MODEL_TYPES,
                          default=list(script_utils.PRETRAINED_MODEL_TYPES),
                          help="Which pretrained models to evaluate (default: all of them)")
@@ -170,7 +178,12 @@ if __name__ == "__main__":
     parser.add_argument("--split", choices=["train", "test"], default=EVAL_SPLIT_DEFAULT,
                         help="Evaluate against each dataset's train or test split")
     parser.add_argument("--max-samples", type=int, default=None,
-                        help="Cap the number of samples evaluated per dataset (random subset)")
+                        help="Cap the number of samples evaluated per dataset (random subset). "
+                             "Ignored if --sample-fraction is given.")
+    parser.add_argument("--sample-fraction", type=float, default=None,
+                        help="Keep this fraction (0, 1] of each dataset's samples (random subset), "
+                             "computed per-dataset rather than --max-samples' fixed count shared "
+                             "across every dataset regardless of size.")
     parser.add_argument("--sample-seed", type=int, default=TRAIN_SAMPLE_SEED_DEFAULT)
     parser.add_argument("--batch-size", type=int, default=EVAL_BATCH_SIZE_DEFAULT,
                         help="Chunk size for image loading; these models score one image per "

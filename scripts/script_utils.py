@@ -18,6 +18,9 @@ MODEL_CHOICES = ("vit", "cnn", "hybrid", "topiq_nr", "musiq", "qalign_mini")
 # pretrained-only IQA model this repo ships an off-the-shelf wrapper for (as opposed to vit/cnn/hybrid,
 # and musiq-with-a-checkpoint, which score with a locally trained head). Used by
 # scripts/run_eval_pretrained.py to eval "every pretrained model" without hardcoding the list twice.
+# DeQA-Score is evaluated separately via scripts/run_eval_deqa.py (run under deqa_venv) rather than
+# through this list -- its vendored modeling code needs an older pinned transformers than this
+# venv has, so it can't be constructed in-process here (see src/model/deqa/constants.py).
 PRETRAINED_MODEL_TYPES = ("topiq_nr", "musiq", "qalign_mini")
 SCORE_WEIGHTS = np.array([5, 4, 3, 2, 1], dtype=np.float32)
 

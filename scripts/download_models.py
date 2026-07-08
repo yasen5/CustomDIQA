@@ -18,6 +18,11 @@ Fetches:
                  this repo's manual QAlignMiniForQuality and a plain
                  transformers.AutoModelForImageTextToText.from_pretrained(..., local_files_only=True)
                  call load from.
+  - deqa:        zhiyuanyou/DeQA-Score-Mix3 HF snapshot, safetensors only (the duplicate
+                 pytorch_model*.bin shards are skipped to save ~16GB of disk)
+                 (cache: checkpoints/deqa_pretrained) — loaded by src/model/deqa's
+                 deqa_worker.py subprocess (see src/model/deqa/constants.py for why that runs in
+                 its own venv instead of in-process like every other model here).
 
 Run with no arguments to fetch everything, or --models to fetch a subset.
 """
@@ -27,7 +32,7 @@ import sys
 
 sys.path.insert(0, ".")
 
-MODEL_KEYS = ("dinov2", "imagenet", "topiq_nr", "musiq_koniq", "qalign")
+MODEL_KEYS = ("dinov2", "imagenet", "topiq_nr", "musiq_koniq", "qalign", "deqa")
 
 
 def download_dinov2():
@@ -84,12 +89,27 @@ def download_qalign():
     print("[qalign] done.")
 
 
+def download_deqa():
+    from huggingface_hub import snapshot_download
+
+    from src.model.deqa.constants import DEQA_CACHE_DIR, DEQA_MODEL_ID
+
+    print(f"[deqa] fetching {DEQA_MODEL_ID} snapshot (safetensors only) into {DEQA_CACHE_DIR}...")
+    snapshot_download(
+        repo_id=DEQA_MODEL_ID,
+        cache_dir=DEQA_CACHE_DIR,
+        ignore_patterns=["pytorch_model*.bin", "pytorch_model.bin.index.json", "*.md"],
+    )
+    print("[deqa] done.")
+
+
 DOWNLOADERS = {
     "dinov2": download_dinov2,
     "imagenet": download_imagenet,
     "topiq_nr": download_topiq_nr,
     "musiq_koniq": download_musiq_koniq,
     "qalign": download_qalign,
+    "deqa": download_deqa,
 }
 
 

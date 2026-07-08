@@ -225,3 +225,4 @@ dataset_split_failures.json
 analysis-results/
 *.csv
 slurm_logs/
+*venv/
