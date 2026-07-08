@@ -145,6 +145,18 @@ class QAlignMiniIQA:
         self.processor = AutoProcessor.from_pretrained(self.snapshot_dir, local_files_only=True)
         self.model = QAlignMiniForQuality(self.snapshot_dir).to(device).eval()
 
+        # The checkpoint loads in bf16 (see QAlignMiniForQuality), but bf16 tensor cores only
+        # exist from Ampere (compute capability 8.0) onward — on older cards (e.g. Turing/RTX
+        # 2080Ti, cc 7.5) bf16 dtype is still *accepted* by CUDA (torch.cuda.is_bf16_supported()
+        # returns True there too) but matmuls silently run through a slow emulated path (~100x
+        # slower measured on a 2080Ti). fp16 runs at full tensor-core speed on those older cards
+        # and is safe for this use: qalign_mini only does short-sequence inference, not training,
+        # so fp16's narrower dynamic range isn't a practical concern.
+        if device.type == "cuda" and torch.cuda.get_device_capability(device)[0] < 8:
+            print(f"NOTE: {device} ({torch.cuda.get_device_name(device)}) has no bf16 tensor cores"
+                  " — running qalign_mini in fp16 instead")
+            self.model = self.model.half()
+
         # Leading-space quality words are single-token ids in this tokenizer: (5,).
         self.level_token_ids = torch.tensor(
             [
